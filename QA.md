@@ -2,6 +2,13 @@
 
 Candidate: 6664f26. Not yet approved for publication.
 
+Update: Ez manager fix f29c01d applied to the PA's loaded runtime. Manager suite:
+225 passed, two skipped, TypeScript and release checks passed. Independent review
+by /root/cancel_review found no blockers. Three actual PA cancellations (SIGTERM
+and SIGINT) returned 130 and the exact command containers were absent after exit.
+GitHub identity readback still succeeded. The runtime cancellation blocker below
+is resolved for this patched PA; upstream merge/release remains pending.
+
 Five tests passed in source and extracted npm archive: literal argument transport,
 ambient GitHub-token removal, native failure propagation, invalid executable
 rejection and cancellation. Runtime images built from source and extracted archive.
