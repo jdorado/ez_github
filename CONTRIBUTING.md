@@ -27,7 +27,7 @@ whose tag resolves to the tested current `main` commit. The receipt binds
 SHA-256 and public independent-review/test evidence URLs. Dispatch the caller
 on `main` with the numeric draft release ID, version, source SHA and independently
 verified SHA-256. Actions validates and publishes those bytes without rebuilding.
-Only `X.Y.Z-beta.N` and the `beta` dist-tag are supported.
+Only `X.Y.Z-beta.N` versions published to the `latest` dist-tag are supported.
 
 The npm package owner must separately authenticate and enroll `jdorado/ez_github`
 and caller filename `publish-beta.yml`, with direct publication enabled and no
@@ -39,12 +39,7 @@ Keep npm tokens and private profiles out of Actions and test containers.
 Preserve Actions registry readback and artifact hash on the release record,
 then finish and read back the public GitHub prerelease and required installation
 QA. After uncertain publication, inspect registry state before retrying. Never
-publish to probe authentication, overwrite a version or promote to `latest`.
+publish to probe authentication or overwrite a version.
 
-Initial bootstrap remains pending: npm returned 404 for this package and GitHub
-release ID `385442062` is an existing draft beta.1 candidate, not a public
-release. Preserve that draft and candidate; reconcile their existing release
-review before any initial publication. An npm package must exist before trust
-can be enrolled, so the first genuine approved release needs authenticated
-interactive npm publication with exact artifact readback. Then enroll OIDC
-trust. This caller PR neither publishes nor replaces the bootstrap candidate.
+Initial beta.1 bootstrap is complete. Verify current registry version, trust and
+release readback before preparing a new version; never replace that artifact.
