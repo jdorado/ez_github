@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-beta.2
+
+- Adopt latest-tag publication and the corrected shared publisher main-CI selection. Git/gh transport remains unchanged.
+- Testing beta; previously documented live-provider and fresh-host acceptance limits remain.
+
 ## 0.1.0-beta.1
 
 Initial Git/gh transport with private profile, writable repository volume,
