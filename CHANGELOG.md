@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-beta.3
+
+- Align the executable, README, package and plugin manifest on the new prerelease version.
+- Add the standard verify and release package-boundary checks; Git/gh transport remains unchanged.
+
 ## 0.1.0-beta.2
 
 - Adopt latest-tag publication and the corrected shared publisher main-CI selection. Git/gh transport remains unchanged.

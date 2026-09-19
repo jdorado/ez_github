@@ -2,7 +2,7 @@
 
 Use an isolated worktree and focused PR. Update package/manifest versions together,
 refresh package-lock.json and CHANGELOG.md, and never replace a published version.
-Run npm test, npm audit --omit=dev, git diff --check and npm pack --ignore-scripts.
+Run npm run verify, npm run release:check, npm audit --omit=dev, git diff --check and npm pack --ignore-scripts.
 Inspect both Git history and archive for credentials and private records. Test the
 extracted archive and build its Docker runtime, then install through a fresh Ez
 registry with isolated volumes. Verify no inherited credentials, native arguments,

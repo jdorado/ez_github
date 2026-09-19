@@ -1,7 +1,7 @@
 # Contributing
 
 Use one isolated worktree and branch per change. Preserve unrelated state.
-Run npm test and git diff --check. Package with npm pack --ignore-scripts;
+Run npm run verify, npm run release:check, npm audit --omit=dev and git diff --check. Package with npm pack --ignore-scripts;
 test and build the extracted package and verify Ez manager installation.
 Credentials, argument transport and cancellation changes require negative tests.
 Never put provider credentials or private records in tests or PRs.
