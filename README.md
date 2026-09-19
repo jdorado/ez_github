@@ -4,8 +4,8 @@ Thin native GitHub CLI and Git plugin for Ez. Private per-agent profile and writ
 repository volume; no provider API implementation or workflow engine.
 
 Requires Node 22+, Docker/Compose and Ez with the cancellation fix (manager release
-0.1.0-beta.13 or newer). Obtain `@jc_stack/ez-github@0.1.0-beta.1` with
-`npm pack @jc_stack/ez-github@0.1.0-beta.1 --ignore-scripts`, extract into a permanent
+0.1.0-beta.13 or newer). Obtain `@jc_stack/ez-github@0.1.0-beta.3` with
+`npm pack @jc_stack/ez-github@0.1.0-beta.3 --ignore-scripts`, extract into a permanent
 private tools directory, and inspect the extracted package.
 
 Inspect this directory with `ez plugins inspect github --source /absolute/package`,
@@ -25,7 +25,7 @@ not encrypted by a keyring. No unattended identity creation or token display.
 
 Uninstall preserves data. Revocation is separate in GitHub's authorized applications.
 Rollback retains volumes; do not run concurrent writers on one repository. Test with
-`npm test`, Docker build and manager dispatch. Live GitHub verification needs consent.
+`npm run verify`, `npm run release:check`, Docker build and manager dispatch. Live GitHub verification needs consent.
 
 Testing beta: Debian supplies Git/gh updates at image build; the installed image
 is retained by Ez's source revision. Capture `gh --version` and `git --version` during QA.
