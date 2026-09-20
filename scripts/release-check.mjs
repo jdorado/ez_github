@@ -11,6 +11,7 @@ const deployment = readJson('ez-deployment.json');
 assert.match(pkg.version, /^\d+\.\d+\.\d+-beta\.\d+$/);
 assert.equal(pkg.private, undefined);
 assert.deepEqual(pkg.publishConfig, {access: 'public', tag: 'latest'});
+assert.deepEqual(pkg.ezRelease, {protocol: 1, kind: 'plugin', stateSchema: 1, mainProtocol: 1});
 assert.equal(pkg.version, manifest.version);
 assert.equal(manifest.id, 'github');
 assert.deepEqual(manifest.commands.github, {
