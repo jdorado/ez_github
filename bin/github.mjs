@@ -11,7 +11,7 @@ export function command(args) {
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   process.umask(0o077);
   const args=process.argv.slice(2);
-  if(args[0]==='--version') console.log('ez-github 0.1.0-beta.3');
+  if(args[0]==='--version') console.log('ez-github 0.1.0-beta.4');
   else if(!args.length||args[0]==='--help') console.log('ez github doctor | gh <native arguments> | git <native arguments>\nPrivate repositories: /repos. Native stdin, output and exit codes. Read skills/github/SKILL.md for OAuth onboarding.');
   else {
     try {

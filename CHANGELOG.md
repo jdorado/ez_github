@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-beta.4
+
+- Add the required Ez release contract so the native updater can admit the package.
+- Publish a corrective beta after the malformed beta.3 package.
+
 ## 0.1.0-beta.3
 
 - Align the executable, README, package and plugin manifest on the new prerelease version.
