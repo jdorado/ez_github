@@ -1,0 +1,1 @@
+{"schemaVersion":2,"services":{"plugin":{"buildTarget":"runtime","volumes":{"profile":"/state"},"workspace":true,"healthcheck":["node","/app/bin/issues.mjs","--version"],"memoryMiB":128}},"commands":{"github-issues":{"service":"plugin","argv":["node","/app/bin/issues.mjs"]}}}
