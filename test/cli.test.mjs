@@ -37,6 +37,7 @@ test('no arbitrary executable or shell route',()=>{
 });
 test('runtime CLI belongs to the non-root container user',()=>{
   const dockerfile=readFileSync(resolve('Dockerfile'),'utf8');
+  assert.match(dockerfile,/https:\/\/cli\.github\.com\/packages/);
   assert.match(dockerfile,/^COPY --chown=node:node bin \/app\/bin$/m);
   assert.match(dockerfile,/^USER node$/m);
 });
