@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {command} from '../bin/github.mjs';
-import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {spawnSync,spawn} from 'node:child_process';
@@ -34,4 +34,9 @@ test('termination reaches the native child',async()=>{
 });
 test('no arbitrary executable or shell route',()=>{
   for(const tool of ['sh','bash','../git','execute']) assert.throws(()=>command([tool]));
+});
+test('runtime CLI belongs to the non-root container user',()=>{
+  const dockerfile=readFileSync(resolve('Dockerfile'),'utf8');
+  assert.match(dockerfile,/^COPY --chown=node:node bin \/app\/bin$/m);
+  assert.match(dockerfile,/^USER node$/m);
 });
