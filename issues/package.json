@@ -5,8 +5,30 @@
   "description": "Issue-only GitHub reporting for the Stocks agent",
   "license": "MIT",
   "type": "module",
-  "repository": {"type": "git", "url": "git+https://github.com/jdorado/ez_github.git", "directory": "issues"},
-  "engines": {"node": ">=22"},
-  "files": ["bin", "skills", "test", "Dockerfile", ".dockerignore", "ez-plugin.json", "ez-deployment.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "package-lock.json"],
-  "scripts": {"test": "node --test test/*.test.mjs", "verify": "node --check bin/issues.mjs && npm test"}
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jdorado/ez_github.git",
+    "directory": "issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "bin",
+    "skills",
+    "test",
+    "Dockerfile",
+    ".dockerignore",
+    "ez-plugin.json",
+    "ez-deployment.json",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "pnpm-workspace.yaml"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "verify": "node --check bin/issues.mjs && pnpm test"
+  },
+  "packageManager": "pnpm@10.30.3"
 }
