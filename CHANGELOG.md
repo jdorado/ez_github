@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Work-check fails closed (error, exit 1) for filter fields that are not single-select/text, unreadable filtered values and over-long task identities; verify now syntax-checks `bin/work-check.mjs`.
 - Preserve runtime CLI access when Ez snapshots package files with private modes by assigning the copied command to the non-root container user.
 - Install GitHub CLI from its signed upstream package repository so current commands such as Projects are available.
 

@@ -41,6 +41,6 @@ Manage with `ez plugins stop|start|status github`. Uninstall preserves both volu
 Revoking GitHub OAuth is separate from local logout. Back up volumes privately;
 never commit profiles. Shared host/Docker administrators remain trusted.
 
-For native scheduled eligibility, `ez github-work --help` describes the read-only complete Project check, caller-supplied field filters and structured task metadata. Provider/schema errors are not an empty queue; the checker neither writes tasks nor dispatches an agent. Native scheduling and each role's model remain with Ez.
+For native scheduled eligibility, `ez github-work --help` describes the read-only complete Project check, caller-supplied field filters and structured task metadata. Provider/schema errors are not an empty queue; A malformed, ambiguous or over-long (200+ characters) `ez-work` block on any open item blocks the whole queue (the check errors, fail closed) by design; fix or remove the block to unblock it. Filter fields must be single-select or text, and an unreadable value for a filtered field is an error.  the checker neither writes tasks nor dispatches an agent. Native scheduling and each role's model remain with Ez.
 
 For coordination, `github-work --project PROJECT_NODE_ID --observe-all` fingerprints complete Project state, including waiting, closed and archived items. It ignores queue clocks/metadata and permits a changed-state check even for an empty Project. Use it with native changed-mode admission; keep role queue selection on the filtered path.
