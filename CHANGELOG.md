@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Preserve runtime CLI access when Ez snapshots package files with private modes by assigning the copied command to the non-root container user.
+- Install GitHub CLI from its signed upstream package repository so current commands such as Projects are available.
+
 ## 0.1.0-beta.4
 
 - Add the required Ez release contract so the native updater can admit the package.
