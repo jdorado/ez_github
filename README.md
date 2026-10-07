@@ -27,7 +27,8 @@ Uninstall preserves data. Revocation is separate in GitHub's authorized applicat
 Rollback retains volumes; do not run concurrent writers on one repository. Test with
 `npm run verify`, `npm run release:check`, Docker build and manager dispatch. Live GitHub verification needs consent.
 
-Testing beta: Debian supplies Git/gh updates at image build; the installed image
+Testing beta: Debian supplies Git and the signed upstream GitHub CLI repository
+supplies gh at image build; the installed image
 is retained by Ez's source revision. Capture `gh --version` and `git --version` during QA.
 Fresh isolated Docker installation and PA authentication are tested; a separate
 machine/reboot and a fresh OAuth consent in that environment remain stable-release QA.
