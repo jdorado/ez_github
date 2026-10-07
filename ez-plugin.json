@@ -1,1 +1,31 @@
-{"schemaVersion":1,"id":"github","version":"0.1.0-beta.4","description":"GitHub CLI and Git with a private agent profile and writable repositories","commands":{"github":{"executable":"bin/github.mjs","args":[],"exposure":{"receivesExternalContent":true,"sendsExternally":true,"changesRecords":true,"requiresReview":true}}},"skills":["skills/github/SKILL.md"]}
+{
+  "schemaVersion": 1,
+  "id": "github",
+  "version": "0.1.0-beta.4",
+  "description": "GitHub CLI and Git with a private agent profile and writable repositories",
+  "commands": {
+    "github": {
+      "executable": "bin/github.mjs",
+      "args": [],
+      "exposure": {
+        "receivesExternalContent": true,
+        "sendsExternally": true,
+        "changesRecords": true,
+        "requiresReview": true
+      }
+    },
+    "github-work": {
+      "executable": "bin/work-check.mjs",
+      "args": [],
+      "exposure": {
+        "receivesExternalContent": true,
+        "sendsExternally": false,
+        "changesRecords": false,
+        "requiresReview": false
+      }
+    }
+  },
+  "skills": [
+    "skills/github/SKILL.md"
+  ]
+}
