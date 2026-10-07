@@ -16,3 +16,14 @@ test('provider errors never turn into an empty-success response',async()=>{
  await assert.rejects(()=>checkProject('PVT_test',[],false,async()=>({stdout:JSON.stringify({errors:[{message:'denied'}]})})),/unavailable/);
  await assert.rejects(()=>checkProject('wrong',[],false),/node ID/);
 });
+
+test('coordination observes all states without treating them as queue assignments',()=>{
+ const future=item('future','RoleX','Backlog',{schemaVersion:1,identity:'x',notBefore:'2030-01-01T00:00:00Z'});
+ const closed={...item('closed'),isArchived:true,content:{state:'CLOSED',body:'```ez-work\ninvalid\n```'}};
+ const result=selectWork([future,closed],['Executor','Stage'],[],false,now,true);
+ assert.equal(result.count,2);assert.equal(result.eligible,true);
+ const changed=selectWork([{...future,updatedAt:'2026-10-07T11:59:00Z'},closed],['Executor','Stage'],[],false,now,true);
+ assert.notEqual(result.fingerprint,changed.fingerprint);
+ assert.equal(selectWork([],[],[],false,now,true).eligible,true);
+ assert.throws(()=>selectWork([],['Executor'],[['Executor','x']],false,now,true),/cannot filter/);
+});
