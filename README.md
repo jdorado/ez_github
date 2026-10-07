@@ -25,7 +25,7 @@ not encrypted by a keyring. No unattended identity creation or token display.
 
 Uninstall preserves data. Revocation is separate in GitHub's authorized applications.
 Rollback retains volumes; do not run concurrent writers on one repository. Test with
-`npm run verify`, `npm run release:check`, Docker build and manager dispatch. Live GitHub verification needs consent.
+`pnpm run verify`, `pnpm run release:check`, Docker build and manager dispatch. Live GitHub verification needs consent.
 
 Testing beta: Debian supplies Git and the signed upstream GitHub CLI repository
 supplies gh at image build; the installed image
