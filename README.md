@@ -4,8 +4,8 @@ Thin native GitHub CLI and Git plugin for Ez. Private per-agent profile and writ
 repository volume; no provider API implementation or workflow engine.
 
 Requires Node 22+, Docker/Compose and Ez with the cancellation fix (manager release
-0.1.0-beta.13 or newer). Obtain `@jc_stack/ez-github@0.1.0-beta.4` with
-`npm pack @jc_stack/ez-github@0.1.0-beta.4 --ignore-scripts`, extract into a permanent
+0.1.0-beta.50 or newer). Obtain `@jc_stack/ez-github@0.1.0-beta.5` with
+`npm pack @jc_stack/ez-github@0.1.0-beta.5 --ignore-scripts`, extract into a permanent
 private tools directory, and inspect the extracted package.
 
 Inspect this directory with `ez plugins inspect github --source /absolute/package`,
@@ -32,6 +32,9 @@ supplies gh at image build; the installed image
 is retained by Ez's source revision. Capture `gh --version` and `git --version` during QA.
 Fresh isolated Docker installation and PA authentication are tested; a separate
 machine/reboot and a fresh OAuth consent in that environment remain stable-release QA.
+
+Requires Ez core 0.1.0-beta.50 or newer for the manifest example.
+Older cores refuse the update and retain the installed version.
 
 ## Read-only work queue preflight
 

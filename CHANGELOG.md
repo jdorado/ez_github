@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-beta.5
+
+- Requires Ez core 0.1.0-beta.50 or newer for the manifest example.
+  Older cores refuse the update and retain the installed version.
+- Add representative manifest examples for tool discovery; align the private issue adapter on beta.2.
 
 - Add the read-only `github-work` command: a Project work eligibility check for core's owner-configured schedule preflight. It reads the complete Project through the private profile with caller-supplied field filters and optional `ez-work` metadata, returns only eligibility, IDs and a stable fingerprint, and makes no task writes or agent dispatch; `--observe-all` fingerprints complete Project state for changed-mode admission. Existing `github`/Git commands are unchanged.
 - Work-check fails closed (error, exit 1) for filter fields that are not single-select/text, unreadable filtered values and over-long task identities; verify now syntax-checks `bin/work-check.mjs`.

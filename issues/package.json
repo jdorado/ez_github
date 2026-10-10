@@ -1,6 +1,6 @@
 {
   "name": "@jc_stack/ez-github-issues-stocks",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "private": true,
   "description": "Issue-only GitHub reporting for the Stocks agent",
   "license": "MIT",
