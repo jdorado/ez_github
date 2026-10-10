@@ -62,7 +62,7 @@ async function main() {
     console.log('ez github-issues doctor | list --repo OWNER/REPO | view --repo OWNER/REPO --number N | create --repo OWNER/REPO --title TITLE --body-file PATH | auth set\nAllowed: jdorado/stocks, jdorado/ezstocks-plugin. auth set reads a fine-grained GitHub token from stdin; never paste it into arguments.');
     return;
   }
-  if (input.action === '--version') { console.log('0.1.0-beta.1'); return; }
+  if (input.action === '--version') { console.log('0.1.0-beta.2'); return; }
   if (input.action === 'auth-set') {
     const token = readFileSync(0, 'utf8').trim();
     if (!/^github_pat_[A-Za-z0-9_]+$/.test(token)) throw Error('Expected a fine-grained GitHub token on stdin');
