@@ -32,3 +32,9 @@ supplies gh at image build; the installed image
 is retained by Ez's source revision. Capture `gh --version` and `git --version` during QA.
 Fresh isolated Docker installation and PA authentication are tested; a separate
 machine/reboot and a fresh OAuth consent in that environment remain stable-release QA.
+
+## Read-only work queue preflight
+
+`ez github-work --project PROJECT_NODE_ID --field Role=CIO --field Status=Ready --require-metadata` reads the complete Project through the private GitHub profile, returning only eligibility, IDs and a stable fingerprint. Field names/values are caller supplied; this adapter contains no role, model or workflow routing. `ez-work` JSON on an issue records `schemaVersion:1`, `identity`, optional `notBefore` and `freshUntil`; requiring metadata also requires a valid unexpired freshness clock. Missing provider/schema coverage is an error, never empty work. A malformed, ambiguous or over-long (200+ characters) `ez-work` block on any open item blocks the whole queue (the check errors, fail closed) by design; fix or remove the block to unblock it. Filter fields must be single-select or text, and an unreadable value for a filtered field is an error. This command makes no task writes and starts no agent. Core's installed plugin preflight calls it before creating an LLM run. Existing native `github`/Git commands are unchanged. Managed snippet: unnecessary; installed help/skill owns discovery.
+
+For coordination, `github-work --project PROJECT_NODE_ID --observe-all` fingerprints complete Project state, including waiting, closed and archived items. It ignores queue clocks/metadata and permits a changed-state check even for an empty Project. Use it with native changed-mode admission; keep role queue selection on the filtered path.

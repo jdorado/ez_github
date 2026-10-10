@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add the read-only `github-work` command: a Project work eligibility check for core's owner-configured schedule preflight. It reads the complete Project through the private profile with caller-supplied field filters and optional `ez-work` metadata, returns only eligibility, IDs and a stable fingerprint, and makes no task writes or agent dispatch; `--observe-all` fingerprints complete Project state for changed-mode admission. Existing `github`/Git commands are unchanged.
+- Work-check fails closed (error, exit 1) for filter fields that are not single-select/text, unreadable filtered values and over-long task identities; verify now syntax-checks `bin/work-check.mjs`.
 - Preserve runtime CLI access when Ez snapshots package files with private modes by assigning the copied command to the non-root container user.
 - Install GitHub CLI from its signed upstream package repository so current commands such as Projects are available.
 
