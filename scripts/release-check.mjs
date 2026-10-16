@@ -25,9 +25,12 @@ assert.deepEqual(manifest.commands.github, {
   },
 });
 assert.equal(manifest.commands['github-work'].executable, 'bin/work-check.mjs');
-assert.deepEqual(manifest.skills, ['skills/github/SKILL.md']);
+assert.equal(manifest.commands.kanban.executable, 'bin/kanban.mjs');
+assert.equal(manifest.commands.kanban.exposure.requiresReview, false);
+assert.deepEqual(manifest.skills, ['skills/github/SKILL.md', 'skills/kanban/SKILL.md']);
 assert.deepEqual(deployment.commands.github.argv, ['node', '/app/bin/github.mjs']);
 assert.deepEqual(deployment.commands['github-work'].argv, ['node', '/app/bin/work-check.mjs']);
+assert.deepEqual(deployment.commands.kanban.argv, ['node', '/app/bin/kanban.mjs']);
 assert.deepEqual(deployment.services.plugin.healthcheck, ['node', '/app/bin/github.mjs', '--version']);
 
 const version = spawnSync(process.execPath, ['bin/github.mjs', '--version'], {encoding: 'utf8'});
@@ -42,6 +45,9 @@ const files = pack.files.map(file => file.path);
 for (const required of [
   'bin/github.mjs',
   'bin/work-check.mjs',
+  'bin/kanban.mjs',
+  'skills/kanban/SKILL.md',
+  'test/kanban.test.mjs',
   'scripts/release-check.mjs',
   'skills/github/SKILL.md',
   'test/cli.test.mjs',
