@@ -30,6 +30,13 @@
         "node",
         "/app/bin/work-check.mjs"
       ]
+    },
+    "kanban": {
+      "service": "plugin",
+      "argv": [
+        "node",
+        "/app/bin/kanban.mjs"
+      ]
     }
   }
 }

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "github",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "description": "GitHub CLI and Git with a private agent profile and writable repositories",
   "example": "github gh repo view OWNER/REPO",
   "commands": {
@@ -24,9 +24,20 @@
         "changesRecords": false,
         "requiresReview": false
       }
+    },
+    "kanban": {
+      "executable": "bin/kanban.mjs",
+      "args": [],
+      "exposure": {
+        "receivesExternalContent": true,
+        "sendsExternally": true,
+        "changesRecords": true,
+        "requiresReview": false
+      }
     }
   },
   "skills": [
-    "skills/github/SKILL.md"
+    "skills/github/SKILL.md",
+    "skills/kanban/SKILL.md"
   ]
 }

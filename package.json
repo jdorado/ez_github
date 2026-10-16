@@ -1,6 +1,6 @@
 {
   "name": "@jc_stack/ez-github",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "description": "Native Git and GitHub CLI with private per-agent profiles for Ez",
   "license": "MIT",
   "engines": {
@@ -44,7 +44,7 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "verify": "node --check bin/github.mjs && node --check bin/work-check.mjs && pnpm test",
+    "verify": "node --check bin/github.mjs && node --check bin/work-check.mjs && node --check bin/kanban.mjs && pnpm test",
     "release:check": "node scripts/release-check.mjs"
   }
 }

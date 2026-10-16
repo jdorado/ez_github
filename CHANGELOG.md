@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-beta.6
+
+- Add `kanban`: basic task-board commands for any agent (`board`, `list`, `show`, `add`, `move`, `set`, `comment`) over a GitHub Project, with JSON output and readback after each write. Tracker-neutral verbs; no workflow rules. Declared `requiresReview: false` because it only changes the team's own task board.
+
 ## 0.1.0-beta.5
 
 - Requires Ez core 0.1.0-beta.50 or newer for the manifest example.
