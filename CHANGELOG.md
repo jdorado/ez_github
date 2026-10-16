@@ -2,6 +2,7 @@
 
 ## 0.1.0-beta.6
 
+- Validate kanban fields and values before writing, compare numeric readback as numbers, and confirm newly created comments through provider readback.
 - Add `kanban`: basic task-board commands for any agent (`board`, `list`, `show`, `add`, `move`, `set`, `comment`) over a GitHub Project, with JSON output and readback after each write. Tracker-neutral verbs; no workflow rules. Declared `requiresReview: false` because it only changes the team's own task board.
 
 ## 0.1.0-beta.5
