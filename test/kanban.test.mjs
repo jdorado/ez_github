@@ -27,7 +27,10 @@ function fakeGh(items) {
       if(args.includes('--single-select-option-id')) it.fieldValues.nodes.push(value(f.name,{name:f.options.find(o=>o.id===args.at(-1)).name}));
       if(args.includes('--date')) it.fieldValues.nodes.push(value(f.name,{date:args.at(-1)}));
       if(args.includes('--text')) it.fieldValues.nodes.push(value(f.name,{text:args.at(-1)}));
-      if(args.includes('--number')) it.fieldValues.nodes.push(value(f.name,{number:Number(args.at(-1))}));
+      if(args.includes('--number')) {
+        assert.match(args.at(-1),/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/,'native gh requires a decimal float argument');
+        it.fieldValues.nodes.push(value(f.name,{number:Number(args.at(-1))}));
+      }
       return '{}';
     }
     if(args[0]==='issue'&&args[1]==='create') return 'Creating issue\nhttps://github.com/o/r/issues/9\n';
@@ -115,7 +118,7 @@ test('set validates the whole batch before its first write',async()=>{
 });
 test('number readback accepts canonical values and clearing',async()=>{
   const {gh}=board(),k=kanban({gh});
-  for(const [input,expected] of [['1.0',1],['1e2',100],['0',0]]) {
+  for(const [input,expected] of [['1.0',1],['1e2',100],['0',0],[' 1 ',1],['0x10',16]]) {
     const out=await k.set({board:'o/2'},['o/r#1',`Points=${input}`]);
     assert.equal(out.fields.Points,expected);
   }

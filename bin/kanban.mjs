@@ -80,7 +80,7 @@ export function kanban({gh,columnField='Status'}) {
     if(f.dataType==='NUMBER' && (!value.trim()||!Number.isFinite(Number(value)))) throw Error(`${f.name} takes a number`);
     const flag={TEXT:'--text',DATE:'--date',NUMBER:'--number'}[f.dataType];
     if(!flag) throw Error(`${f.name} (${f.dataType}) cannot be set here`);
-    return [...base,flag,value];
+    return [...base,flag,f.dataType==='NUMBER'?String(Number(value)):value];
   };
   const setAll=async(b,card,pairs)=>{
     const edits=pairs.map(([name,value])=>editArgs(b,name,value));
