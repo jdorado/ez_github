@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {kanban,main,parseBoard,pairs} from '../bin/kanban.mjs';
 
 const field=(id,name,dataType,options)=>({id,name,dataType,...(options?{options:options.map((n,i)=>({id:`${id}o${i}`,name:n}))}:{})});
-const FIELDS=[field('F1','Status','SINGLE_SELECT',['Backlog','Ready','Done']),field('F2','Due date','DATE'),field('F3','Role','TEXT'),field('F4','Title','TEXT')];
+const FIELDS=[field('F1','Status','SINGLE_SELECT',['Backlog','Ready','Done']),field('F2','Due date','DATE'),field('F3','Role','TEXT'),field('F4','Title','TEXT'),field('F5','Points','NUMBER')];
 const value=(name,v)=>({...v,field:{name}});
 const item=(id,number,fields,extra={})=>({id,isArchived:false,...extra,
   content:{__typename:'Issue',number,title:`Task ${number}`,url:`https://github.com/o/r/issues/${number}`,state:'OPEN',repository:{nameWithOwner:'o/r'}},
@@ -14,6 +14,7 @@ function fakeGh(items) {
   const calls=[],state=structuredClone(items);
   const gh=async args=>{
     calls.push(args);
+    if(args[0]==='api'&&args[1]==='repos/o/r/issues/comments/5') return JSON.stringify({html_url:'https://github.com/o/r/issues/1#issuecomment-5'});
     if(args[0]==='api') {
       const query=args.find(a=>a.startsWith('query=')),after=args.find(a=>a.startsWith('after='));
       if(query.includes('node(id:')) {const id=args.find(a=>a.startsWith('id=')).slice(3);return JSON.stringify({data:{node:state.find(x=>x.id===id)}});}
@@ -26,6 +27,10 @@ function fakeGh(items) {
       if(args.includes('--single-select-option-id')) it.fieldValues.nodes.push(value(f.name,{name:f.options.find(o=>o.id===args.at(-1)).name}));
       if(args.includes('--date')) it.fieldValues.nodes.push(value(f.name,{date:args.at(-1)}));
       if(args.includes('--text')) it.fieldValues.nodes.push(value(f.name,{text:args.at(-1)}));
+      if(args.includes('--number')) {
+        assert.match(args.at(-1),/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/,'native gh requires a decimal float argument');
+        it.fieldValues.nodes.push(value(f.name,{number:Number(args.at(-1))}));
+      }
       return '{}';
     }
     if(args[0]==='issue'&&args[1]==='create') return 'Creating issue\nhttps://github.com/o/r/issues/9\n';
@@ -75,10 +80,12 @@ test('add creates the issue, puts it on the board and sets fields',async()=>{
   assert.equal(calls.filter(a=>a[1]==='create').length,1);
 });
 test('show and comment use the issue',async()=>{
-  const k=kanban({gh:board().gh});
+  const {gh,calls}=board(),k=kanban({gh});
   const shown=await k.show({board:'o/2'},['o/r#1']);
   assert.equal(shown.body,'Do it');assert.equal(shown.comments[0].author,'a');
   assert.deepEqual(await k.comment({board:'o/2',body:'Done: see PR'},['PVTI_1']),{card:'PVTI_1',ref:'o/r#1',comment:'https://github.com/o/r/issues/1#issuecomment-5'});
+  const write=calls.findIndex(a=>a[0]==='issue'&&a[1]==='comment');
+  assert.deepEqual(calls[write+1],['api','repos/o/r/issues/comments/5']);
   await assert.rejects(k.comment({board:'o/2'},['PVTI_1']),/--body/);
 });
 test('argument errors and help',async()=>{
@@ -87,4 +94,39 @@ test('argument errors and help',async()=>{
   assert.match(await main([],async()=>''),/ez kanban/);
   await assert.rejects(main(['delete','--board','o/2'],async()=>''),/Unknown command delete/);
   await assert.rejects(main(['list'],async()=>''),/--board/);
+});
+
+test('invalid add options and values cause no writes',async()=>{
+  for(const options of [
+    {column:'Typo'},
+    {set:['Status=Typo']},
+    {set:['Due date=tomorrow']},
+    {set:['Due date=2026-02-31']},
+    {set:['Points=nope']},
+    {set:['Points= ']},
+    {set:['Nope=1']},
+  ]) {
+    const {gh,calls}=board();
+    await assert.rejects(kanban({gh}).add({board:'o/2',repo:'o/r',title:'New',...options}));
+    assert.equal(calls.filter(a=>a[0]!=='api').length,0);
+  }
+});
+test('set validates the whole batch before its first write',async()=>{
+  const {gh,calls}=board();
+  await assert.rejects(kanban({gh}).set({board:'o/2'},['o/r#1','Role=Researcher','Status=Typo']),/not an option/);
+  assert.equal(calls.filter(a=>a[0]!=='api').length,0);
+});
+test('number readback accepts canonical values and clearing',async()=>{
+  const {gh}=board(),k=kanban({gh});
+  for(const [input,expected] of [['1.0',1],['1e2',100],['0',0],[' 1 ',1],['0x10',16]]) {
+    const out=await k.set({board:'o/2'},['o/r#1',`Points=${input}`]);
+    assert.equal(out.fields.Points,expected);
+  }
+  assert.equal((await k.set({board:'o/2'},['o/r#1','Points='])).fields.Points,undefined);
+});
+test('comment fails when provider readback does not match',async()=>{
+  const fake=board();
+  const gh=async args=>args[0]==='api'&&args[1]==='repos/o/r/issues/comments/5'
+    ?JSON.stringify({html_url:'https://github.com/o/r/issues/1#issuecomment-6'}):fake.gh(args);
+  await assert.rejects(kanban({gh}).comment({board:'o/2',body:'Done'},['o/r#1']),/Comment readback/);
 });

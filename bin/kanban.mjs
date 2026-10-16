@@ -68,26 +68,28 @@ export function kanban({gh,columnField='Status'}) {
     return card;
   };
   const readback=async id=>plain((await gql(NODE,{id})).node);
-  const assign=async(b,card,name,value)=>{
-    const f=field(b,name),base=['project','item-edit','--id',card,'--project-id',b.id,'--field-id',f.id];
-    if(value==='') return gh([...base,'--clear']);
+  const editArgs=(b,name,value)=>{
+    const f=field(b,name),base=['--field-id',f.id];
+    if(value==='') return [...base,'--clear'];
     if(f.dataType==='SINGLE_SELECT') {
       const o=f.options.find(x=>x.name.toLowerCase()===value.toLowerCase());
       if(!o) throw Error(`"${value}" is not an option of ${f.name}: ${f.options.map(x=>x.name).join(', ')}`);
-      return gh([...base,'--single-select-option-id',o.id]);
+      return [...base,'--single-select-option-id',o.id];
     }
-    if(f.dataType==='DATE' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw Error(`${f.name} takes a date YYYY-MM-DD`);
-    if(f.dataType==='NUMBER' && !Number.isFinite(Number(value))) throw Error(`${f.name} takes a number`);
+    if(f.dataType==='DATE' && (!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isFinite(Date.parse(value))||new Date(value).toISOString().slice(0,10)!==value)) throw Error(`${f.name} takes a date YYYY-MM-DD`);
+    if(f.dataType==='NUMBER' && (!value.trim()||!Number.isFinite(Number(value)))) throw Error(`${f.name} takes a number`);
     const flag={TEXT:'--text',DATE:'--date',NUMBER:'--number'}[f.dataType];
     if(!flag) throw Error(`${f.name} (${f.dataType}) cannot be set here`);
-    return gh([...base,flag,value]);
+    return [...base,flag,f.dataType==='NUMBER'?String(Number(value)):value];
   };
   const setAll=async(b,card,pairs)=>{
-    for(const [name,value] of pairs) await assign(b,card,name,value);
+    const edits=pairs.map(([name,value])=>editArgs(b,name,value));
+    for(const args of edits) await gh(['project','item-edit','--id',card,'--project-id',b.id,...args]);
     const after=await readback(card);
     for(const [name,value] of pairs) {
-      const got=after.fields[field(b,name).name]??'';
-      if(String(got).toLowerCase()!==String(value).toLowerCase()) throw Error(`Readback: ${name} is "${got}", expected "${value}"`);
+      const f=field(b,name),got=after.fields[f.name]??'';
+      const matches=f.dataType==='NUMBER'&&value!==''?typeof got==='number'&&got===Number(value):String(got).toLowerCase()===String(value).toLowerCase();
+      if(!matches) throw Error(`Readback: ${name} is "${got}", expected "${value}"`);
     }
     return after;
   };
@@ -109,7 +111,7 @@ export function kanban({gh,columnField='Status'}) {
       if(!/^[\w.-]+\/[\w.-]+$/.test(o.repo??'')||!o.title) throw Error('add needs --repo OWNER/REPO and --title');
       const b=await read(o.board);
       const pre=[...(o.column?[[columnField,o.column]]:[]),...pairs(o.set)];
-      for(const [name] of pre) field(b,name);
+      for(const [name,value] of pre) editArgs(b,name,value);
       const url=(await gh(['issue','create','--repo',o.repo,'--title',o.title,...(body(o)??['--body',''])])).trim().split('\n').pop();
       const {id}=await json(['project','item-add',String(b.number),'--owner',b.owner,'--url',url,'--format','json']);
       return pre.length?setAll(b,id,pre):readback(id);
@@ -127,7 +129,11 @@ export function kanban({gh,columnField='Status'}) {
       const card=find(await read(o.board),ref);
       if(card.type==='draft') throw Error('Draft cards take no comments; convert it to an issue');
       const url=(await gh([card.type==='pr'?'pr':'issue','comment',card.url,...text])).trim();
-      return {card:card.card,ref:card.ref,comment:url};
+      const id=/#issuecomment-(\d+)$/.exec(url)?.[1];
+      if(!id) throw Error('Comment write returned no comment id');
+      const saved=await json(['api',`repos/${card.ref.split('#')[0]}/issues/comments/${id}`]);
+      if(saved.html_url!==url) throw Error('Comment readback did not match the created comment');
+      return {card:card.card,ref:card.ref,comment:saved.html_url};
     },
   };
 }
