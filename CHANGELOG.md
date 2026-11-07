@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-beta.7
+
+- Run the runtime image on the October 2026 Node 22 security release (`node:22.23.4-bookworm-slim`, digest pinned); no CLI behavior changes.
+
 ## 0.1.0-beta.6
 
 - Validate kanban fields and values before writing, compare numeric readback as numbers, and confirm newly created comments through provider readback.
