@@ -47,7 +47,8 @@ data repository (2.3 GiB each) accumulated to 91 GiB. The plugin now bounds the 
   research commit, 23 MiB with a 3 MiB directory checked out. Add new files outside the
   checkout with `git add --sparse FILE`. Plain `git clone` remains for work that needs the whole tree.
 - `ez github repos reclaim [--idle-hours N]` removes clones that are idle (default 24 hours),
-  have no uncommitted, untracked or ignored files, no stash and no submodules, and have every
+  have no uncommitted, untracked or ignored files (caches such as `__pycache__`, `.pytest_cache`,
+  `node_modules` and `.venv` excepted), no stash, no submodules or embedded repositories, and have every
   local branch commit (and HEAD) reachable from a remote-tracking ref. The remote is not asked
   again, so a branch deleted there after its push (the usual end of a merged research branch)
   still counts as pushed; tags are not considered. Uncertain clones are kept, and each clone is

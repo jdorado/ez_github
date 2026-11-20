@@ -21,7 +21,7 @@ function fixture() {
   git(root, 'init', '-q', '-b', 'main', seed);
   mkdirSync(join(seed, 'bulk')); mkdirSync(join(seed, 'docs'));
   writeFileSync(join(seed, 'README.md'), 'root\n');
-  writeFileSync(join(seed, '.gitignore'), 'out/\n');
+  writeFileSync(join(seed, '.gitignore'), 'out/\n__pycache__/\nnode_modules/\n');
   writeFileSync(join(seed, 'docs/a.md'), 'doc\n');
   writeFileSync(join(seed, 'bulk/blob.bin'), randomBytes(3 * 1024 * 1024));
   git(seed, 'add', '-A'); git(seed, 'commit', '-q', '-m', 'seed'); git(seed, 'push', '-q', origin, 'main');
@@ -63,6 +63,15 @@ function scenarios(f) {
   const withSub = f.clone('with-submodule');
   git(withSub, 'switch', '-q', '-c', 'with-sub'); git(withSub, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', f.url, 'sub');
   git(withSub, 'commit', '-q', '-m', 'add submodule'); git(withSub, 'push', '-q', '-u', 'origin', 'with-sub');
+  // A repository cloned inside a clone and recorded as a gitlink: the parent is clean and pushed, the inner commit is not.
+  const embeddedParent = f.clone('embedded');
+  git(embeddedParent, 'clone', '-q', f.url, 'inner'); writeFileSync(join(embeddedParent, 'inner/x.md'), 'only here\n');
+  git(join(embeddedParent, 'inner'), 'add', '-A'); git(join(embeddedParent, 'inner'), 'commit', '-q', '-m', 'inner only');
+  git(embeddedParent, 'switch', '-q', '-c', 'with-embedded'); git(embeddedParent, 'add', 'inner'); git(embeddedParent, 'commit', '-q', '-m', 'gitlink'); git(embeddedParent, 'push', '-q', '-u', 'origin', 'with-embedded');
+  // Regenerable caches are ignored output that nobody needs to keep.
+  const caches = f.clone('caches');
+  mkdirSync(join(caches, 'docs/__pycache__'), {recursive: true}); writeFileSync(join(caches, 'docs/__pycache__/a.pyc'), 'x');
+  mkdirSync(join(caches, 'node_modules/pkg'), {recursive: true}); writeFileSync(join(caches, 'node_modules/pkg/index.js'), 'x');
   git(f.root, 'init', '-q', '-b', 'main', join(f.repos, 'empty'));
   // A branch pushed, merged elsewhere and deleted on the remote: the usual end of a research branch.
   const merged = f.clone('merged-deleted');
@@ -82,15 +91,16 @@ test('reclaim removes finished, fully pushed clones and keeps dirty, unpushed or
 
     const later = Date.now() + 25 * HOUR;
     const result = await reclaim(f.repos, {now: later});
-    assert.deepEqual(result.removed.map(item => item.name).sort(), ['done', 'merged-deleted', 'pushed-branch']);
-    assert.ok(result.freedBytes > 3 * 3 * 1024 * 1024, 'all three 3 MiB trees counted');
+    assert.deepEqual(result.removed.map(item => item.name).sort(), ['caches', 'done', 'merged-deleted', 'pushed-branch']);
+    assert.ok(result.freedBytes > 4 * 3 * 1024 * 1024, 'all four 3 MiB trees counted');
     const kept = Object.fromEntries(result.kept.map(item => [item.name, item.reason]));
     assert.deepEqual(kept, {
       dirty: 'uncommitted, untracked or ignored files',
       untracked: 'uncommitted, untracked or ignored files',
       ignored: 'uncommitted, untracked or ignored files',
       nested: 'uncommitted, untracked or ignored files',
-      'with-submodule': 'has submodules',
+      'with-submodule': 'has submodules or embedded repositories',
+      embedded: 'has submodules or embedded repositories',
       empty: 'no commits yet',
       unpushed: 'has commits missing from the remote',
       stashed: 'has a stash',
@@ -98,11 +108,12 @@ test('reclaim removes finished, fully pushed clones and keeps dirty, unpushed or
       'local-only': 'has commits missing from the remote',
       notes: 'not a git clone',
     });
-    for (const name of ['done', 'pushed-branch', 'merged-deleted']) assert.ok(!existsSync(join(f.repos, name)));
+    for (const name of ['done', 'pushed-branch', 'merged-deleted', 'caches']) assert.ok(!existsSync(join(f.repos, name)));
     for (const name of Object.keys(kept)) assert.ok(existsSync(join(f.repos, name)), `${name} must survive`);
     assert.equal(existsSync(join(f.repos, 'dirty', 'README.md')), true);
     assert.equal(existsSync(join(f.repos, 'ignored', 'out/report.md')), true, 'ignored output is work too');
     assert.equal(existsSync(join(f.repos, 'nested', 'out/inner/x')), true);
+    assert.equal(existsSync(join(f.repos, 'embedded', 'inner/x.md')), true, 'the commit that exists only in the embedded repository');
     assert.deepEqual((await listClones(f.repos, {now: later})).filter(c => c.state === 'reclaimable'), []);
   } finally { f.cleanup(); }
 });

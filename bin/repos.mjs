@@ -10,6 +10,8 @@ export const DEFAULT_IDLE_HOURS = 24, DEFAULT_BUDGET_GIB = 16;
 const TOKENS = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
 // Files git touches on commit, checkout, add, fetch and pull; the newest mtime is the clone's last activity.
 const ACTIVITY = ['HEAD', 'index', 'logs/HEAD', 'FETCH_HEAD', 'ORIG_HEAD', 'packed-refs'];
+// Ignored directories that a build or script recreates; every other ignored file is treated as work.
+const REGENERABLE = new Set(['__pycache__', '.pytest_cache', 'node_modules', '.venv']);
 
 export const reposDir = () => process.env.EZ_GITHUB_REPOS_DIR || '/repos';
 export function cleanEnv() {
@@ -65,10 +67,12 @@ async function inspect(path, now, idleMs) {
   if (now - active < idleMs) return keep('recent activity', active);
   try {
     if ((await readdir(join(path, '.git', 'worktrees')).catch(() => [])).length) return keep('has linked worktrees', active);
-    if ((await readdir(join(path, '.git', 'modules')).catch(() => [])).length) return keep('has submodules', active); // their commits are not checked
     if (!(await succeeds(inspectGit(path, 'rev-parse', '-q', '--verify', 'HEAD')))) return keep('no commits yet', active); // also a clone still being created
-    // Ignored files count: build output, notes and .env files are work that exists nowhere else.
-    if ((await inspectGit(path, '-c', 'status.renames=false', 'status', '--porcelain', '--ignored', '--untracked-files=normal')).stdout.trim()) return keep('uncommitted, untracked or ignored files', active);
+    // Commits inside a submodule or an embedded repository (a gitlink in the index) are not checked, so keep the clone.
+    if ((await readdir(join(path, '.git', 'modules')).catch(() => [])).length || /^160000 /m.test((await inspectGit(path, 'ls-files', '--stage')).stdout)) return keep('has submodules or embedded repositories', active);
+    // Ignored files count: build output, notes and .env files are work that exists nowhere else. Regenerable caches do not.
+    const status = (await inspectGit(path, '-c', 'status.renames=false', 'status', '--porcelain', '--ignored', '--untracked-files=normal')).stdout;
+    if (status.split('\n').filter(Boolean).some(line => !(line.startsWith('!! ') && line.slice(3).split('/').some(part => REGENERABLE.has(part))))) return keep('uncommitted, untracked or ignored files', active);
     if (await succeeds(inspectGit(path, 'rev-parse', '-q', '--verify', 'refs/stash'))) return keep('has a stash', active);
     // "On a remote" means a remote-tracking ref records it. The remote is not asked again: merged branches are routinely deleted there.
     const unpushed = (await inspectGit(path, 'rev-list', '--max-count=1', '--branches', 'HEAD', '--not', '--remotes')).stdout.trim();
@@ -85,7 +89,7 @@ export async function diskBytes(...paths) {
   let stdout;
   try { ({stdout} = await run('du', ['-sk', ...paths], {maxBuffer: 16 * 1024 * 1024})); } catch (error) {
     if (error.stdout) stdout = error.stdout; // unreadable entries: report what du could count
-    else if (/No such file or directory/.test(error.stderr ?? '')) return sizes; // removed by a concurrent reclaim
+    else if (!(await Promise.all(paths.map(path => stat(path).then(() => true, () => false)))).some(Boolean)) return sizes; // all removed by a concurrent reclaim
     else throw error;
   }
   for (const line of stdout.split('\n').filter(Boolean)) {
@@ -186,7 +190,7 @@ export const HELP = `ez github repos clone OWNER/REPO|URL [NAME] [--path DIR]...
 ez github repos list [--idle-hours N]
   JSON: budget, usage and every clone's size, last activity and state (reclaimable, or keep with the reason).
 ez github repos reclaim [--idle-hours N]
-  Removes clones idle for N hours (default ${DEFAULT_IDLE_HOURS}) with no uncommitted, untracked or ignored files, no stash, no submodules, and every local branch commit (and HEAD) reachable from a remote-tracking ref. The remote is not re-checked, so a branch deleted there after its push still counts as pushed. Tags are not considered. Anything else is kept.
+  Removes clones idle for N hours (default ${DEFAULT_IDLE_HOURS}) with no uncommitted, untracked or ignored files (regenerable caches excepted), no stash, no submodules or embedded repositories, and every local branch commit (and HEAD) reachable from a remote-tracking ref. The remote is not re-checked, so a branch deleted there after its push still counts as pushed. Tags are not considered. Anything else is kept.
 Every git clone and gh repo clone through this plugin first reclaims, then fails when /repos is over its budget (default ${DEFAULT_BUDGET_GIB} GiB, EZ_GITHUB_REPOS_BUDGET_GIB).`;
 
 export async function repos(args, dir = reposDir()) {
