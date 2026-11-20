@@ -4,8 +4,8 @@ Thin native GitHub CLI and Git plugin for Ez. Private per-agent profile and writ
 repository volume; no provider API implementation or workflow engine.
 
 Requires Node 22+, Docker/Compose and Ez with the cancellation fix (manager release
-0.1.0-beta.60 or newer). Obtain `@jc_stack/ez-github@0.1.0-beta.7` with
-`npm pack @jc_stack/ez-github@0.1.0-beta.7 --ignore-scripts`, extract into a permanent
+0.1.0-beta.60 or newer). Obtain `@jc_stack/ez-github@0.1.0-beta.8` with
+`npm pack @jc_stack/ez-github@0.1.0-beta.8 --ignore-scripts`, extract into a permanent
 private tools directory, and inspect the extracted package.
 
 Inspect this directory with `ez plugins inspect github --source /absolute/package`,
@@ -35,6 +35,28 @@ machine/reboot and a fresh OAuth consent in that environment remain stable-relea
 
 Requires Ez core 0.1.0-beta.60 or newer for the manifest example.
 Older cores refuse the update and retain the installed version.
+
+## Bounded repository clones
+
+Agents clone into `/repos`; nothing used to remove those clones, so full clones of a large
+data repository (2.3 GiB each) accumulated to 91 GiB. The plugin now bounds the volume itself:
+
+- `ez github repos clone OWNER/REPO [NAME] [--path DIR]... [--branch BRANCH]` clones with
+  `--filter=blob:none --sparse`, materialising only the root files and the `--path`
+  directories. Measured on a 2.3 GiB repository: 17 MiB root only, 18 MiB after an add-only
+  research commit, 23 MiB with a 3 MiB directory checked out. Add new files outside the
+  checkout with `git add --sparse FILE`. Plain `git clone` remains for work that needs the whole tree.
+- `ez github repos reclaim [--idle-hours N]` removes clones that are idle (default 24 hours),
+  have no uncommitted, untracked or ignored files (caches such as `__pycache__`, `.pytest_cache`,
+  `node_modules` and `.venv` excepted), no stash, no submodules or embedded repositories, and have every
+  local branch commit (and HEAD) reachable from a remote-tracking ref. The remote is not asked
+  again, so a branch deleted there after its push (the usual end of a merged research branch)
+  still counts as pushed; tags are not considered. Uncertain clones are kept, and each clone is
+  inspected again right before removal. `ez github repos list` shows the same decision per
+  clone without removing.
+- Every `git clone` and `gh repo clone` through the plugin reclaims first, then refuses while
+  `/repos` is over its budget (default 16 GiB; set `EZ_GITHUB_REPOS_BUDGET_GIB` in the
+  service environment to change it). This is a bound, not a security boundary.
 
 ## Kanban
 
