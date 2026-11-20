@@ -44,6 +44,7 @@ const [pack] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--ignore-sc
 const files = pack.files.map(file => file.path);
 for (const required of [
   'bin/github.mjs',
+  'bin/repos.mjs',
   'bin/work-check.mjs',
   'bin/kanban.mjs',
   'skills/kanban/SKILL.md',
@@ -51,6 +52,7 @@ for (const required of [
   'scripts/release-check.mjs',
   'skills/github/SKILL.md',
   'test/cli.test.mjs',
+  'test/repos.test.mjs',
   'test/work-check.test.mjs',
   'Dockerfile',
   '.dockerignore',

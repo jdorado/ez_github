@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-beta.8
+
+- Bound the repositories volume. `ez github repos clone OWNER/REPO [NAME] [--path DIR]...` makes a partial, sparse clone (history without file contents, working tree of the root files plus the listed directories): a 2.3 GiB data repository clones in about 17 MiB, and a research commit adds about 1 MiB. `repos list` shows each clone's size and whether it is reclaimable; `repos reclaim` removes clones that are idle (default 24 hours), clean, stash-free and fully on a remote, and keeps everything else.
+- Every `git clone` and `gh repo clone` through this plugin first reclaims, then fails loudly when `/repos` is over its budget (default 16 GiB, `EZ_GITHUB_REPOS_BUDGET_GIB`). Other git and gh commands, arguments and exit codes are unchanged. Fixes clones accumulating forever (91 GiB of full clones on one agent).
+
 ## 0.1.0-beta.7
 
 - Run the runtime image on the October 2026 Node 22 security release (`node:22.23.4-bookworm-slim`, digest pinned); no CLI behavior changes.
