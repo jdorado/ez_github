@@ -5,7 +5,7 @@ import {existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync} f
 import {randomBytes} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
-import {isClone, listClones, prepareClone, reclaim} from '../bin/repos.mjs';
+import {diskBytes, isClone, listClones, prepareClone, reclaim} from '../bin/repos.mjs';
 
 const HOUR = 3600e3;
 const bin = resolve('bin/github.mjs');
@@ -21,6 +21,7 @@ function fixture() {
   git(root, 'init', '-q', '-b', 'main', seed);
   mkdirSync(join(seed, 'bulk')); mkdirSync(join(seed, 'docs'));
   writeFileSync(join(seed, 'README.md'), 'root\n');
+  writeFileSync(join(seed, '.gitignore'), 'out/\n');
   writeFileSync(join(seed, 'docs/a.md'), 'doc\n');
   writeFileSync(join(seed, 'bulk/blob.bin'), randomBytes(3 * 1024 * 1024));
   git(seed, 'add', '-A'); git(seed, 'commit', '-q', '-m', 'seed'); git(seed, 'push', '-q', origin, 'main');
@@ -53,6 +54,21 @@ function scenarios(f) {
   const local = join(f.repos, 'local-only');
   git(f.root, 'init', '-q', '-b', 'main', local); writeFileSync(join(local, 'x'), 'x'); git(local, 'add', '-A'); git(local, 'commit', '-q', '-m', 'no remote');
   mkdirSync(join(f.repos, 'notes')); writeFileSync(join(f.repos, 'notes/todo.txt'), 'not a clone\n');
+  // Work that `git status` hides unless ignored files are counted, plus submodules and clones with no commits.
+  const ignored = f.clone('ignored');
+  mkdirSync(join(ignored, 'out')); writeFileSync(join(ignored, 'out/report.md'), 'research result, ignored by .gitignore\n');
+  const nested = f.clone('nested');
+  mkdirSync(join(nested, 'out')); git(f.root, 'init', '-q', '-b', 'main', join(nested, 'out/inner'));
+  writeFileSync(join(nested, 'out/inner/x'), 'x'); git(join(nested, 'out/inner'), 'add', '-A'); git(join(nested, 'out/inner'), 'commit', '-q', '-m', 'inner, no remote');
+  const withSub = f.clone('with-submodule');
+  git(withSub, 'switch', '-q', '-c', 'with-sub'); git(withSub, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', f.url, 'sub');
+  git(withSub, 'commit', '-q', '-m', 'add submodule'); git(withSub, 'push', '-q', '-u', 'origin', 'with-sub');
+  git(f.root, 'init', '-q', '-b', 'main', join(f.repos, 'empty'));
+  // A branch pushed, merged elsewhere and deleted on the remote: the usual end of a research branch.
+  const merged = f.clone('merged-deleted');
+  git(merged, 'switch', '-q', '-c', 'codex/merged'); writeFileSync(join(merged, 'docs/m.md'), 'm\n');
+  git(merged, 'add', '-A'); git(merged, 'commit', '-q', '-m', 'merged'); git(merged, 'push', '-q', '-u', 'origin', 'codex/merged');
+  git(f.origin, 'branch', '-q', '-D', 'codex/merged');
   return {done, pushedBranch};
 }
 
@@ -66,22 +82,54 @@ test('reclaim removes finished, fully pushed clones and keeps dirty, unpushed or
 
     const later = Date.now() + 25 * HOUR;
     const result = await reclaim(f.repos, {now: later});
-    assert.deepEqual(result.removed.map(item => item.name).sort(), ['done', 'pushed-branch']);
-    assert.ok(result.freedBytes > 2 * 3 * 1024 * 1024, 'both 3 MiB trees counted');
+    assert.deepEqual(result.removed.map(item => item.name).sort(), ['done', 'merged-deleted', 'pushed-branch']);
+    assert.ok(result.freedBytes > 3 * 3 * 1024 * 1024, 'all three 3 MiB trees counted');
     const kept = Object.fromEntries(result.kept.map(item => [item.name, item.reason]));
     assert.deepEqual(kept, {
-      dirty: 'uncommitted or untracked changes',
-      untracked: 'uncommitted or untracked changes',
+      dirty: 'uncommitted, untracked or ignored files',
+      untracked: 'uncommitted, untracked or ignored files',
+      ignored: 'uncommitted, untracked or ignored files',
+      nested: 'uncommitted, untracked or ignored files',
+      'with-submodule': 'has submodules',
+      empty: 'no commits yet',
       unpushed: 'has commits missing from the remote',
       stashed: 'has a stash',
       detached: 'has commits missing from the remote',
       'local-only': 'has commits missing from the remote',
       notes: 'not a git clone',
     });
-    for (const name of ['done', 'pushed-branch']) assert.ok(!existsSync(join(f.repos, name)));
+    for (const name of ['done', 'pushed-branch', 'merged-deleted']) assert.ok(!existsSync(join(f.repos, name)));
     for (const name of Object.keys(kept)) assert.ok(existsSync(join(f.repos, name)), `${name} must survive`);
     assert.equal(existsSync(join(f.repos, 'dirty', 'README.md')), true);
+    assert.equal(existsSync(join(f.repos, 'ignored', 'out/report.md')), true, 'ignored output is work too');
+    assert.equal(existsSync(join(f.repos, 'nested', 'out/inner/x')), true);
     assert.deepEqual((await listClones(f.repos, {now: later})).filter(c => c.state === 'reclaimable'), []);
+  } finally { f.cleanup(); }
+});
+
+test('reclaim looks again before removing, so work started after the first pass is kept', async () => {
+  const f = fixture();
+  try {
+    const busy = f.clone('busy'), idle = f.clone('idle');
+    age(busy, 30); age(idle, 30);
+    const result = await reclaim(f.repos, {
+      idleHours: 24,
+      afterListing: async () => writeFileSync(join(busy, 'README.md'), 'edited after the first pass\n'),
+    });
+    assert.deepEqual(result.removed.map(item => item.name), ['idle']);
+    assert.ok(result.kept.some(item => item.name === 'busy' && item.reason === 'uncommitted, untracked or ignored files'));
+    assert.equal(existsSync(join(busy, 'README.md')), true);
+  } finally { f.cleanup(); }
+});
+
+test('concurrent reclaims remove each clone once and neither fails', async () => {
+  const f = fixture();
+  try {
+    for (const name of ['a', 'b', 'c', 'd']) age(f.clone(name), 30);
+    const [one, two] = await Promise.all([reclaim(f.repos), reclaim(f.repos)]);
+    const names = [...one.removed, ...two.removed].map(item => item.name).sort();
+    assert.deepEqual(names, ['a', 'b', 'c', 'd']);
+    assert.deepEqual(await listClones(f.repos), []);
   } finally { f.cleanup(); }
 });
 
@@ -111,6 +159,17 @@ test('listing and reclaiming never refresh the clones they inspect', async () =>
   } finally { f.cleanup(); }
 });
 
+test('sizing tolerates paths a concurrent reclaim already removed', async () => {
+  const f = fixture();
+  try {
+    const here = f.clone('here');
+    assert.equal((await diskBytes(join(f.repos, 'gone'))).size, 0);
+    const sizes = await diskBytes(join(f.repos, 'gone'), here);
+    assert.deepEqual([...sizes.keys()], [here]);
+    assert.ok(sizes.get(here) > 3 * 1024 * 1024);
+  } finally { f.cleanup(); }
+});
+
 test('an interrupted removal is finished by the next run', async () => {
   const f = fixture();
   try {
@@ -130,7 +189,7 @@ test('a clone is refused loudly over budget, and an idle finished clone is recla
     const refused = run('0.001', 'blocked'); // 1 MiB, the dirty clone alone is over it
     assert.equal(refused.status, 1);
     assert.match(refused.stderr, /over its 1\.0 MiB budget/);
-    assert.match(refused.stderr, /dirty .*uncommitted or untracked changes/);
+    assert.match(refused.stderr, /dirty .*uncommitted, untracked or ignored files/);
     assert.ok(!existsSync(join(f.repos, 'blocked')));
 
     const finished = f.clone('finished'); age(finished, 30);
@@ -151,8 +210,8 @@ test('prepareClone ignores a missing repositories directory and rejects a bad bu
 });
 
 test('every clone route is recognised and other git and gh commands are not', () => {
-  for (const args of [['git', 'clone', 'u'], ['git', '-c', 'a=b', 'clone', 'u'], ['git', '-C', '/repos', 'clone', 'u'], ['git', '--git-dir', 'x', 'clone', 'u'], ['gh', 'repo', 'clone', 'O/R']]) assert.equal(isClone(args), true, args.join(' '));
-  for (const args of [['git', 'commit', '-m', 'clone'], ['git', '-C', '/repos/clone', 'status'], ['git', 'log', '--', 'clone'], ['gh', 'repo', 'view', 'O/R'], ['gh', 'pr', 'clone'], ['doctor'], []]) assert.equal(isClone(args), false, args.join(' '));
+  for (const args of [['git', 'clone', 'u'], ['git', '-c', 'a=b', 'clone', 'u'], ['git', '-C', '/repos', 'clone', 'u'], ['git', '--git-dir', 'x', 'clone', 'u'], ['gh', 'repo', 'clone', 'O/R'], ['gh', 'repo', 'fork', 'O/R', '--clone'], ['gh', 'repo', 'create', 'N', '--private', '-c']]) assert.equal(isClone(args), true, args.join(' '));
+  for (const args of [['git', 'commit', '-m', 'clone'], ['git', '-C', '/repos/clone', 'status'], ['git', 'log', '--', 'clone'], ['gh', 'repo', 'view', 'O/R'], ['gh', 'repo', 'fork', 'O/R'], ['gh', 'pr', 'clone'], ['doctor'], []]) assert.equal(isClone(args), false, args.join(' '));
 });
 
 test('repos clone is partial and sparse, and the add-only research flow pushes without the big directory', () => {

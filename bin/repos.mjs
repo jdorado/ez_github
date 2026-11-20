@@ -33,7 +33,7 @@ const idleHoursOf = value => {
 // True for any command that creates a clone: git [global options] clone, gh repo clone.
 export function isClone(args) {
   const [tool, ...rest] = args;
-  if (tool === 'gh') return rest[0] === 'repo' && rest[1] === 'clone';
+  if (tool === 'gh') return rest[0] === 'repo' && (rest[1] === 'clone' || (['fork', 'create'].includes(rest[1]) && rest.some(arg => arg === '--clone' || arg === '--clone=true' || arg === '-c')));
   if (tool !== 'git') return false;
   const withValue = new Set(['-c', '-C', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
   let i = 0;
@@ -41,7 +41,8 @@ export function isClone(args) {
   return rest[i] === 'clone';
 }
 
-// Inspection never writes: no optional locks (status must not refresh the index and look like activity) and no lazy fetch.
+// Inspection never writes: no optional locks, so status cannot refresh the index and look like activity.
+// GIT_NO_LAZY_FETCH only exists from git 2.44; status.renames is off so a partial clone never fetches blobs to detect renames.
 const inspectGit = (path, ...args) => run('git', ['--no-optional-locks', '-C', path, ...args], {
   env: {...cleanEnv(), GIT_NO_LAZY_FETCH: '1', GIT_TERMINAL_PROMPT: '0'}, maxBuffer: 64 * 1024 * 1024, timeout: 120e3, // a wedged clone is kept, never waited on forever
 });
@@ -63,12 +64,14 @@ async function inspect(path, now, idleMs) {
   const active = await lastActivity(path);
   if (now - active < idleMs) return keep('recent activity', active);
   try {
-    const worktrees = await readdir(join(path, '.git', 'worktrees')).catch(() => []);
-    if (worktrees.length) return keep('has linked worktrees', active);
-    if ((await inspectGit(path, 'status', '--porcelain', '--untracked-files=normal')).stdout.trim()) return keep('uncommitted or untracked changes', active);
+    if ((await readdir(join(path, '.git', 'worktrees')).catch(() => [])).length) return keep('has linked worktrees', active);
+    if ((await readdir(join(path, '.git', 'modules')).catch(() => [])).length) return keep('has submodules', active); // their commits are not checked
+    if (!(await succeeds(inspectGit(path, 'rev-parse', '-q', '--verify', 'HEAD')))) return keep('no commits yet', active); // also a clone still being created
+    // Ignored files count: build output, notes and .env files are work that exists nowhere else.
+    if ((await inspectGit(path, '-c', 'status.renames=false', 'status', '--porcelain', '--ignored', '--untracked-files=normal')).stdout.trim()) return keep('uncommitted, untracked or ignored files', active);
     if (await succeeds(inspectGit(path, 'rev-parse', '-q', '--verify', 'refs/stash'))) return keep('has a stash', active);
-    const hasHead = await succeeds(inspectGit(path, 'rev-parse', '-q', '--verify', 'HEAD'));
-    const unpushed = (await inspectGit(path, 'rev-list', '--max-count=1', '--branches', ...(hasHead ? ['HEAD'] : []), '--not', '--remotes')).stdout.trim();
+    // "On a remote" means a remote-tracking ref records it. The remote is not asked again: merged branches are routinely deleted there.
+    const unpushed = (await inspectGit(path, 'rev-list', '--max-count=1', '--branches', 'HEAD', '--not', '--remotes')).stdout.trim();
     if (unpushed) return keep('has commits missing from the remote', active);
     return {state: 'reclaimable', reason: null, lastActivity: new Date(active).toISOString()};
   } catch (error) {
@@ -81,8 +84,9 @@ export async function diskBytes(...paths) {
   if (!paths.length) return sizes;
   let stdout;
   try { ({stdout} = await run('du', ['-sk', ...paths], {maxBuffer: 16 * 1024 * 1024})); } catch (error) {
-    if (!error.stdout) throw error;
-    stdout = error.stdout; // unreadable entries: report what du could count
+    if (error.stdout) stdout = error.stdout; // unreadable entries: report what du could count
+    else if (/No such file or directory/.test(error.stderr ?? '')) return sizes; // removed by a concurrent reclaim
+    else throw error;
   }
   for (const line of stdout.split('\n').filter(Boolean)) {
     const tab = line.indexOf('\t');
@@ -105,29 +109,31 @@ export async function listClones(dir, {now = Date.now(), idleHours = DEFAULT_IDL
   return clones;
 }
 
-// Removes clones that are idle, clean, stash-free and fully on a remote. Anything uncertain is kept.
-export async function reclaim(dir, {now = Date.now(), idleHours = DEFAULT_IDLE_HOURS} = {}) {
+// Removes clones that are idle, clean (ignored files too), stash-free and fully on a remote. Anything uncertain is kept.
+export async function reclaim(dir, {now = Date.now(), idleHours = DEFAULT_IDLE_HOURS, afterListing} = {}) {
   for (const entry of await readdir(dir).catch(() => [])) { // finish a removal that was interrupted
     if (entry.startsWith('.reclaim-')) await rm(join(dir, entry), {recursive: true, force: true}).catch(() => {});
   }
   const clones = await listClones(dir, {now, idleHours});
-  const doomed = clones.filter(clone => clone.state === 'reclaimable');
-  const sizes = await diskBytes(...doomed.map(clone => clone.path));
-  const removed = [];
-  for (const clone of doomed) {
+  await afterListing?.(); // test seam: lets a test act between the first pass and the removals
+  const removed = [], kept = clones.filter(clone => clone.state !== 'reclaimable');
+  for (const clone of clones.filter(item => item.state === 'reclaimable')) {
+    // The pass above can take minutes on many large clones: look again right before removing, so work started meanwhile is kept.
+    const again = await inspect(clone.path, now, idleHours * HOUR);
+    if (again.state !== 'reclaimable') { kept.push({...clone, ...again}); continue; }
     const trash = join(dir, `.reclaim-${clone.name}-${process.pid}`);
     try { await rename(clone.path, trash); } catch (error) {
       if (error.code === 'ENOENT') continue; // a concurrent reclaim took it
       throw error;
     }
-    removed.push({name: clone.name, bytes: sizes.get(clone.path) ?? 0});
+    removed.push({name: clone.name, bytes: (await diskBytes(trash)).get(trash) ?? 0});
     await rm(trash, {recursive: true, force: true});
   }
   return {
     idleHours,
     removed,
     freedBytes: removed.reduce((sum, item) => sum + item.bytes, 0),
-    kept: clones.filter(clone => clone.state !== 'reclaimable').map(({name, reason}) => ({name, reason})),
+    kept: kept.map(({name, reason}) => ({name, reason})),
   };
 }
 
@@ -136,7 +142,8 @@ export async function prepareClone(dir = reposDir(), {budget = budgetBytes(), no
   if (!(await stat(dir).catch(() => null))) return;
   const result = await reclaim(dir, {now, idleHours});
   if (result.removed.length) console.error(`ez-github: reclaimed ${result.removed.length} finished clone(s), freed ${fmt(result.freedBytes)}`);
-  const used = (await diskBytes(dir)).get(dir) ?? 0;
+  const used = (await diskBytes(dir)).get(dir);
+  if (used === undefined) throw Error(`Could not measure ${dir}`);
   if (used <= budget) return;
   const sizes = await diskBytes(...result.kept.map(clone => join(dir, clone.name)));
   const largest = result.kept
@@ -179,7 +186,7 @@ export const HELP = `ez github repos clone OWNER/REPO|URL [NAME] [--path DIR]...
 ez github repos list [--idle-hours N]
   JSON: budget, usage and every clone's size, last activity and state (reclaimable, or keep with the reason).
 ez github repos reclaim [--idle-hours N]
-  Removes clones idle for N hours (default ${DEFAULT_IDLE_HOURS}) that are clean, have no stash and every local branch commit on a remote. Anything else is kept.
+  Removes clones idle for N hours (default ${DEFAULT_IDLE_HOURS}) with no uncommitted, untracked or ignored files, no stash, no submodules, and every local branch commit (and HEAD) reachable from a remote-tracking ref. The remote is not re-checked, so a branch deleted there after its push still counts as pushed. Tags are not considered. Anything else is kept.
 Every git clone and gh repo clone through this plugin first reclaims, then fails when /repos is over its budget (default ${DEFAULT_BUDGET_GIB} GiB, EZ_GITHUB_REPOS_BUDGET_GIB).`;
 
 export async function repos(args, dir = reposDir()) {

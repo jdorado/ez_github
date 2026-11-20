@@ -47,8 +47,12 @@ data repository (2.3 GiB each) accumulated to 91 GiB. The plugin now bounds the 
   research commit, 23 MiB with a 3 MiB directory checked out. Add new files outside the
   checkout with `git add --sparse FILE`. Plain `git clone` remains for work that needs the whole tree.
 - `ez github repos reclaim [--idle-hours N]` removes clones that are idle (default 24 hours),
-  clean, have no stash and have every local branch commit on a remote-tracking ref; uncertain
-  clones are kept. `ez github repos list` shows the same decision per clone without removing.
+  have no uncommitted, untracked or ignored files, no stash and no submodules, and have every
+  local branch commit (and HEAD) reachable from a remote-tracking ref. The remote is not asked
+  again, so a branch deleted there after its push (the usual end of a merged research branch)
+  still counts as pushed; tags are not considered. Uncertain clones are kept, and each clone is
+  inspected again right before removal. `ez github repos list` shows the same decision per
+  clone without removing.
 - Every `git clone` and `gh repo clone` through the plugin reclaims first, then refuses while
   `/repos` is over its budget (default 16 GiB; set `EZ_GITHUB_REPOS_BUDGET_GIB` in the
   service environment to change it). This is a bound, not a security boundary.
