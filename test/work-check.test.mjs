@@ -61,3 +61,30 @@ test('cli --help exits 0 and a bad project exits 1 with a message',()=>{
  const bad=spawnSync(process.execPath,['bin/work-check.mjs','--project','nope'],{encoding:'utf8'});
  assert.equal(bad.status,1);assert.match(bad.stderr,/node ID/);assert.equal(bad.stdout,'');
 });
+test('checks of one tick share a single Project read; a later tick, a direct call and another Project read again',async t=>{
+ const {mkdtempSync,rmSync,readdirSync,statSync}=await import('node:fs');const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const state=mkdtempSync(join(tmpdir(),'ez-github-work-'));process.env.EZ_GITHUB_STATE_DIR=state;
+ t.after(()=>{delete process.env.EZ_GITHUB_STATE_DIR;rmSync(state,{recursive:true,force:true});});
+ let board=[item('A','RoleX'),item('B','RoleY'),item('C','RoleX','Backlog')],reads=0;
+ const run=async()=>{reads++;return {stdout:JSON.stringify({data:{node:{fields:{nodes:[{name:'Executor',dataType:'SINGLE_SELECT'},{name:'Stage',dataType:'SINGLE_SELECT'}],pageInfo:{hasNextPage:false}},items:{nodes:board,pageInfo:{hasNextPage:false,endCursor:null}}}}})};};
+ const lanes=[[['Executor','RoleX'],['Stage','Ready']],[['Executor','RoleY'],['Stage','Ready']],[['Executor','RoleX'],['Stage','Backlog']],[['Executor','RoleZ']]];
+ const receipt=({observedAt,...rest})=>rest;
+ const alone=[];for(const filters of lanes) alone.push(await checkProject('PVT_test',filters,false,run));
+ assert.equal(reads,4);assert.deepEqual(readdirSync(state),[],'a check without a tick keeps no snapshot');
+ reads=0;const tick=new Date().toISOString(),shared=[];
+ for(const filters of lanes) shared.push(await checkProject('PVT_test',filters,false,run,false,tick));
+ assert.equal(reads,1,'one read serves every check of the tick');
+ assert.deepEqual(shared.map(receipt),alone.map(receipt),'each check keeps its own eligibility, count, fingerprint and items');
+ assert.deepEqual(shared.map(r=>r.count),[1,1,1,0]);assert.ok(shared.every(r=>r.observedAt===shared[0].observedAt && Date.parse(r.observedAt)>=Date.parse(tick)));
+ assert.equal(statSync(join(state,'work-snapshots','PVT_test.json')).mode&0o777,0o600);
+ // A card moved after the tick's read is never served to a later tick from the old snapshot.
+ board=[item('A','RoleX'),item('B','RoleX'),item('C','RoleX','Backlog')];
+ await new Promise(resolve=>setTimeout(resolve,5));const next=new Date().toISOString();
+ const later=await checkProject('PVT_test',lanes[0],false,run,false,next);
+ assert.equal(reads,2);assert.equal(later.count,2);assert.notEqual(later.fingerprint,shared[0].fingerprint);
+ assert.equal((await checkProject('PVT_test',lanes[1],false,run,false,next)).count,0);assert.equal(reads,2);
+ await checkProject('PVT_other',lanes[0],false,run,false,next);assert.equal(reads,3,'another Project has its own read');
+ await checkProject('PVT_test',lanes[0],false,run);assert.equal(reads,4,'a direct call reads again');
+ // A provider error is never replaced by an older snapshot.
+ await assert.rejects(()=>checkProject('PVT_test',lanes[0],false,async()=>({stdout:JSON.stringify({errors:[{message:'denied'}]})}),false,new Date(Date.now()+1).toISOString()),/unavailable/);
+});

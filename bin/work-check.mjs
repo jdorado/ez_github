@@ -4,6 +4,9 @@ import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
 import {parseArgs} from 'node:util';
 import {pathToFileURL} from 'node:url';
+import {mkdir,readFile,rename,rm,writeFile} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
+import {dirname,join} from 'node:path';
 
 const query=`query($project:ID!,$after:String){node(id:$project){...on ProjectV2{fields(first:100){nodes{...on ProjectV2FieldCommon{name dataType}}pageInfo{hasNextPage}}items(first:100,after:$after){nodes{id isArchived updatedAt fieldValues(first:100){nodes{...on ProjectV2ItemFieldSingleSelectValue{name field{...on ProjectV2FieldCommon{name}}}...on ProjectV2ItemFieldTextValue{text field{...on ProjectV2FieldCommon{name}}}}pageInfo{hasNextPage}}content{...on Issue{body state updatedAt}...on DraftIssue{body updatedAt}...on PullRequest{body state updatedAt}}}pageInfo{hasNextPage endCursor}}}}}`;
 const FILTERABLE_TYPES=['SINGLE_SELECT','TEXT'],MAX_IDENTITY=200;
@@ -44,8 +47,32 @@ export function selectWork(items,fields,filters,requireMetadata=false,now=Date.n
  candidates.sort((a,b)=>a.id.localeCompare(b.id));
  return {schemaVersion:1,eligible:observeAll || candidates.length>0,count:candidates.length,observedAt:new Date(now).toISOString(),fingerprint:createHash('sha256').update(JSON.stringify(candidates)).digest('hex'),items:candidates.map(i=>({id:i.id,...(i.identity?{identity:i.identity}:{})}))};
 }
-export async function checkProject(project,filters,requireMetadata,run=promisify(execFile),observeAll=false) {
+// Core sets EZ_PREFLIGHT_SINCE to the start of the scheduler tick a check serves. The checks of one
+// tick share a single complete Project read: one that began at or after that instant, never an older
+// one, and never one older than SHARED_READ_MS. Without the instant every check reads the Project.
+const SHARED_READ_MS=120000;
+const snapshotFile=project=>join(process.env.EZ_GITHUB_STATE_DIR||'/state','work-snapshots',`${project}.json`);
+export async function checkProject(project,filters,requireMetadata,run=promisify(execFile),observeAll=false,since=process.env.EZ_PREFLIGHT_SINCE) {
  if(typeof project!=='string' || !/^PVT_[A-Za-z0-9_-]+$/.test(project)) throw Error('Supply the exact Project node ID');
+ const floor=Date.parse(since??''),file=snapshotFile(project);
+ let board;
+ if(Number.isFinite(floor)) board=await readFile(file,'utf8').then(JSON.parse).then(saved=>{
+  const readAt=Date.parse(saved.readAt);
+  return saved.project===project && readAt>=floor && readAt<=Date.now() && Date.now()-readAt<=SHARED_READ_MS ? saved : undefined;
+ },()=>undefined);
+ if(!board) {
+  board={project,readAt:new Date().toISOString(),...await readProject(project,run)};
+  if(Number.isFinite(floor)) {
+   const tmp=`${file}.${randomUUID()}.tmp`;
+   try {await mkdir(dirname(file),{recursive:true,mode:0o700});await writeFile(tmp,JSON.stringify(board),{mode:0o600,flag:'wx'});await rename(tmp,file);}
+   catch(error) {console.error('Project read not shared:',error.message);}
+   finally {await rm(tmp,{force:true});}
+  }
+ }
+ // observedAt is when the Project was read; queue clocks are judged at the time of this check.
+ return {...selectWork(board.items,board.fields,filters,requireMetadata,Date.now(),observeAll),observedAt:board.readAt};
+}
+async function readProject(project,run) {
  const env={...process.env};for(const key of ['GH_TOKEN','GITHUB_TOKEN','GH_ENTERPRISE_TOKEN','GITHUB_ENTERPRISE_TOKEN'])delete env[key];
  const items=[],seen=new Set();let after,fields;
  do {
@@ -56,12 +83,12 @@ export async function checkProject(project,filters,requireMetadata,run=promisify
   if(!node.items.pageInfo.hasNextPage)break;
   const next=node.items.pageInfo.endCursor;if(!next || next===after)throw Error('Invalid Project cursor');after=next;
  }while(true);
- return selectWork(items,fields,filters,requireMetadata,Date.now(),observeAll);
+ return {fields,items};
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
  try {
   const {values:v}=parseArgs({options:{project:{type:'string'},field:{type:'string',multiple:true},'require-metadata':{type:'boolean'},'observe-all':{type:'boolean'},help:{type:'boolean'}}});
-  if(v.help)console.log('ez github-work --project PROJECT_NODE_ID [--field NAME=VALUE] [--require-metadata] [--observe-all]\nRead-only complete Project queue preflight. Emits schemaVersion, eligible, count, fingerprint, observedAt and item IDs. Task metadata is optional fenced ez-work JSON: schemaVersion:1, identity (max 200 characters), notBefore, freshUntil. A malformed or ambiguous ez-work block on any open item blocks the whole queue (error, fail closed) by design. --require-metadata requires freshUntil; expired/future tasks are ineligible. Observe-all fingerprints every item including closed/archived/future/expired work, ignores queue metadata and always permits a changed-state coordination check. It cannot be combined with queue filters. Filter fields must be single-select or text. Errors never mean empty queue.');
+  if(v.help)console.log('ez github-work --project PROJECT_NODE_ID [--field NAME=VALUE] [--require-metadata] [--observe-all]\nRead-only complete Project queue preflight. Emits schemaVersion, eligible, count, fingerprint, observedAt and item IDs. Task metadata is optional fenced ez-work JSON: schemaVersion:1, identity (max 200 characters), notBefore, freshUntil. A malformed or ambiguous ez-work block on any open item blocks the whole queue (error, fail closed) by design. --require-metadata requires freshUntil; expired/future tasks are ineligible. Observe-all fingerprints every item including closed/archived/future/expired work, ignores queue metadata and always permits a changed-state coordination check. It cannot be combined with queue filters. Filter fields must be single-select or text. Errors never mean empty queue. When core sets EZ_PREFLIGHT_SINCE (the start of the scheduler tick), the checks of that tick share one Project read made at or after it, kept in the private profile for at most two minutes; observedAt is the time of that read.');
   else {
    const filters=(v.field??[]).map(s=>{const at=s.indexOf('=');if(at<1 || at===s.length-1)throw Error('Use --field NAME=VALUE');return [s.slice(0,at),s.slice(at+1)];});
    console.log(JSON.stringify(await checkProject(v.project,filters,v['require-metadata'],undefined,v['observe-all'])));

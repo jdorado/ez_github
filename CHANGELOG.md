@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-beta.9
+
+- `github-work` checks that Ez core runs in one scheduler tick now share a single complete Project read instead of each reading the whole board. Core (the release after 0.79.0) passes the tick's start as `EZ_PREFLIGHT_SINCE`; a check reuses a read only if it began at or after that instant and is under two minutes old, so a later tick, a manual trigger and any direct call still read again. Filtering, eligibility, count, fingerprint and item IDs are unchanged; `observedAt` is now the time the Project was read. With an older core nothing changes. Fixes eight queue lanes on one Project making nine identical reads (about 6 s each) every 15 minutes.
+
 ## 0.1.0-beta.8
 
 - Bound the repositories volume. `ez github repos clone OWNER/REPO [NAME] [--path DIR]...` makes a partial, sparse clone (history without file contents, working tree of the root files plus the listed directories): a 2.3 GiB data repository clones in about 17 MiB, and a research commit adds about 1 MiB. `repos list` shows each clone's size and whether it is reclaimable; `repos reclaim` removes clones that are idle (default 24 hours), have no uncommitted, untracked or ignored files (regenerable caches excepted), no stash, submodules or embedded repositories, and have every local branch commit on a remote-tracking ref; it inspects each clone again right before removal and keeps everything else or uncertain.
