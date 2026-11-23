@@ -4,8 +4,8 @@ Thin native GitHub CLI and Git plugin for Ez. Private per-agent profile and writ
 repository volume; no provider API implementation or workflow engine.
 
 Requires Node 22+, Docker/Compose and Ez with the cancellation fix (manager release
-0.1.0-beta.60 or newer). Obtain `@jc_stack/ez-github@0.1.0-beta.8` with
-`npm pack @jc_stack/ez-github@0.1.0-beta.8 --ignore-scripts`, extract into a permanent
+0.1.0-beta.60 or newer). Obtain `@jc_stack/ez-github@0.1.0-beta.9` with
+`npm pack @jc_stack/ez-github@0.1.0-beta.9 --ignore-scripts`, extract into a permanent
 private tools directory, and inspect the extracted package.
 
 Inspect this directory with `ez plugins inspect github --source /absolute/package`,
@@ -70,6 +70,6 @@ same commands. It holds no workflow rules. Example:
 
 ## Read-only work queue preflight
 
-`ez github-work --project PROJECT_NODE_ID --field Role=CIO --field Status=Ready --require-metadata` reads the complete Project through the private GitHub profile, returning only eligibility, IDs and a stable fingerprint. Field names/values are caller supplied; this adapter contains no role, model or workflow routing. `ez-work` JSON on an issue records `schemaVersion:1`, `identity`, optional `notBefore` and `freshUntil`; requiring metadata also requires a valid unexpired freshness clock. Missing provider/schema coverage is an error, never empty work. A malformed, ambiguous or over-long (200+ characters) `ez-work` block on any open item blocks the whole queue (the check errors, fail closed) by design; fix or remove the block to unblock it. Filter fields must be single-select or text, and an unreadable value for a filtered field is an error. This command makes no task writes and starts no agent. Core's installed plugin preflight calls it before creating an LLM run. Existing native `github`/Git commands are unchanged. Managed snippet: unnecessary; installed help/skill owns discovery.
+`ez github-work --project PROJECT_NODE_ID --field Role=CIO --field Status=Ready --require-metadata` reads the complete Project through the private GitHub profile, returning only eligibility, IDs and a stable fingerprint. Field names/values are caller supplied; this adapter contains no role, model or workflow routing. `ez-work` JSON on an issue records `schemaVersion:1`, `identity`, optional `notBefore` and `freshUntil`; requiring metadata also requires a valid unexpired freshness clock. Missing provider/schema coverage is an error, never empty work. A malformed, ambiguous or over-long (200+ characters) `ez-work` block on any open item blocks the whole queue (the check errors, fail closed) by design; fix or remove the block to unblock it. Filter fields must be single-select or text, and an unreadable value for a filtered field is an error. This command makes no task writes and starts no agent. Core's installed plugin preflight calls it before creating an LLM run. When Ez core (the release after 0.79.0) sets `EZ_PREFLIGHT_SINCE` to the start of a scheduler tick, the tick's checks on the same Project share one complete read made at or after that instant (kept as `work-snapshots/PROJECT.json` in the private profile volume, at most two minutes); a later tick, a manual trigger or a direct call always reads again, and `observedAt` is the time of the read. Existing native `github`/Git commands are unchanged. Managed snippet: unnecessary; installed help/skill owns discovery.
 
 For coordination, `github-work --project PROJECT_NODE_ID --observe-all` fingerprints complete Project state, including waiting, closed and archived items. It ignores queue clocks/metadata and permits a changed-state check even for an empty Project. Use it with native changed-mode admission; keep role queue selection on the filtered path.
