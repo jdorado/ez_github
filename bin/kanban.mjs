@@ -4,30 +4,34 @@
 // Project (v2) through the private gh profile. Another tracker can provide the
 // same verbs and output shape. No workflow rules, gates or routing live here.
 import {execFile} from 'node:child_process';
+import {readFile} from 'node:fs/promises';
 import {promisify} from 'node:util';
 import {parseArgs} from 'node:util';
 import {pathToFileURL} from 'node:url';
 
-const ITEM=`fragment I on ProjectV2Item{id isArchived updatedAt content{__typename ...on Issue{number title url state repository{nameWithOwner}} ...on PullRequest{number title url prState:state repository{nameWithOwner}} ...on DraftIssue{title}} fieldValues(first:50){nodes{
+const ITEM=`fragment I on ProjectV2Item{id isArchived updatedAt content{__typename ...on Issue{number title url state repository{nameWithOwner}} ...on PullRequest{number title url prState:state repository{nameWithOwner}} ...on DraftIssue{title}} fieldValues(first:100){pageInfo{hasNextPage} nodes{
 ...on ProjectV2ItemFieldSingleSelectValue{name field{...on ProjectV2FieldCommon{name}}}
 ...on ProjectV2ItemFieldTextValue{text field{...on ProjectV2FieldCommon{name}}}
 ...on ProjectV2ItemFieldDateValue{date field{...on ProjectV2FieldCommon{name}}}
 ...on ProjectV2ItemFieldNumberValue{number field{...on ProjectV2FieldCommon{name}}}
 ...on ProjectV2ItemFieldIterationValue{title field{...on ProjectV2FieldCommon{name}}}}}}`;
-const PROJECT=`fragment P on ProjectV2{id title fields(first:100){nodes{...on ProjectV2FieldCommon{id name dataType} ...on ProjectV2SingleSelectField{options{id name}}}} items(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{...I}}}`;
+const PROJECT=`fragment P on ProjectV2{id title fields(first:100){pageInfo{hasNextPage} nodes{...on ProjectV2FieldCommon{id name dataType} ...on ProjectV2SingleSelectField{options{id name}}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{...I}}}`;
 const BOARD=`query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){...on User{projectV2(number:$number){...P}} ...on Organization{projectV2(number:$number){...P}}}} ${PROJECT} ${ITEM}`;
 const NODE=`query($id:ID!){node(id:$id){...I}} ${ITEM}`;
 export const HELP=`ez kanban <command> --board OWNER/NUMBER [options]
   board                         columns and fields
   list [--column C] [--field NAME=VALUE]...   cards (no bodies)
   show CARD                     card with body and comments
-  add --repo OWNER/REPO --title T [--body T | --body-file F] [--column C] [--set NAME=VALUE]...
+  add --repo OWNER/REPO --title T [--body T | --body-file F|-] [--column C] [--set NAME=VALUE]...
   move CARD COLUMN              change the card's column, read back
   set CARD NAME=VALUE...        change fields (text, date YYYY-MM-DD, number, option); NAME= clears
-  comment CARD (--body T | --body-file F)
+  comment CARD (--body T | --body-file F|-)
   claim CARD --by WHO --from COLUMN --to COLUMN [--note T]   take a card; exactly one concurrent claimant wins
 CARD is the card id from list, OWNER/REPO#N or the issue/PR URL. --column-field
-names the column field (default Status). Output is JSON; errors exit 1. claim exits 3 when another
+names the column field (default Status). --body-file is read by this command (a missing, unreadable or
+empty file is an error; F must be a path this command can see, - reads stdin), so a long body needs no argument.
+board and list fail (exit 1) unless
+the items read equal the Project's totalCount; other verbs only read the board to find a card. Output is JSON; errors exit 1. claim exits 3 when another
 worker holds the card ({"claimed":false}): leave that card alone and pick another. A lost claim
 reports winnerAgeSeconds, how long ago the winning claim was posted.`;
 
@@ -46,24 +50,31 @@ export function parseBoard(text) {
 // A claim is a comment carrying this marker. Comment ids only grow, so of all claims made since the card last
 // changed, the lowest id is the winner whichever order the claimants read back in.
 export const CLAIM_MARKER='<!-- ez-kanban-claim -->';
-export function kanban({gh,columnField='Status'}) {
+export const readStdin=async()=>{let text='';process.stdin.setEncoding('utf8');for await(const chunk of process.stdin) text+=chunk;return text;};
+export function kanban({gh,columnField='Status',stdin=readStdin}) {
   const json=async args=>JSON.parse(await gh(args));
   const gql=async(query,vars)=>{
     const value=await json(['api','graphql','-f',`query=${query}`,...Object.entries(vars).flatMap(([k,v])=>[typeof v==='number'?'-F':'-f',`${k}=${v}`])]);
     if(value.errors?.length) throw Error(`GitHub: ${value.errors[0].message}`);
     return value.data;
   };
-  const read=async board=>{
-    const {owner,number}=parseBoard(board);let after,project,items=[];
+  const read=async(board,{whole=false}={})=>{
+    const {owner,number}=parseBoard(board);let after,project,items=[],totalCount;
     do {
       const data=await gql(BOARD,{owner,number,...(after?{after}:{})});
       project=data.repositoryOwner?.projectV2;
       if(!project) throw Error(`Board ${board} not found or not readable`);
-      items.push(...project.items.nodes);
+      items.push(...project.items.nodes);totalCount=project.items.totalCount;
       after=project.items.pageInfo.hasNextPage?project.items.pageInfo.endCursor:null;
     } while(after);
+    // `board` and `list` print the board itself, so they must never hand back part of it as the whole; a verb that
+    // only looks for one card is not failed by a card someone else added during the read (a missing card is already an error).
+    if(whole&&items.length!==totalCount) throw Error(`Board ${board}: read ${items.length} of ${totalCount} items`);
+    if(project.fields.pageInfo.hasNextPage) throw Error(`Board ${board} has more than 100 fields; not all were read`);
+    const over=items.find(x=>x?.fieldValues?.pageInfo?.hasNextPage);
+    if(over) throw Error(`Board ${board}: item ${over.id} has more than 100 field values; not all were read`);
     const fields=project.fields.nodes.filter(f=>f?.name);
-    return {owner,number,id:project.id,title:project.title,fields,items:items.map(plain)};
+    return {owner,number,id:project.id,title:project.title,totalCount,fields,items:items.map(plain)};
   };
   const field=(b,name)=>{const f=b.fields.find(x=>x.name.toLowerCase()===name.toLowerCase());if(!f) throw Error(`No field "${name}" on this board`);return f;};
   const find=(b,ref)=>{
@@ -99,11 +110,21 @@ export function kanban({gh,columnField='Status'}) {
     }
     return after;
   };
-  const body=o=>o.body!==undefined?['--body',o.body]:o['body-file']!==undefined?['--body-file',o['body-file']]:null;
+  // --body is passed as is. --body-file is read here, never handed to gh as a path: gh runs where the caller's
+  // file may not exist. The text goes to gh on stdin, so its length is not an argument.
+  const body=async o=>{
+    const file=o['body-file'];
+    if(o.body!==undefined||file===undefined) return o.body!==undefined?{args:['--body',o.body]}:null;
+    const name=file==='-'?'stdin':file;
+    let text;
+    try {text=file==='-'?await stdin():await readFile(file,'utf8');} catch(error) {throw Error(`Cannot read --body-file ${name}: ${error.message}`);}
+    if(!text.trim()) throw Error(`--body-file ${name} is empty`);
+    return {args:['--body-file','-'],input:text};
+  };
   return {
-    async board(o) {const b=await read(o.board);return {board:o.board,title:b.title,columns:field(b,columnField).options?.map(x=>x.name)??[],fields:b.fields.map(f=>({name:f.name,type:f.dataType.toLowerCase(),...(f.options?{options:f.options.map(x=>x.name)}:{})}))};},
+    async board(o) {const b=await read(o.board,{whole:true});return {board:o.board,title:b.title,read:b.items.length,totalCount:b.totalCount,columns:field(b,columnField).options?.map(x=>x.name)??[],fields:b.fields.map(f=>({name:f.name,type:f.dataType.toLowerCase(),...(f.options?{options:f.options.map(x=>x.name)}:{})}))};},
     async list(o) {
-      const b=await read(o.board),filters=pairs(o.field);
+      const b=await read(o.board,{whole:true}),filters=pairs(o.field);
       if(o.column) filters.push([columnField,o.column]);
       return b.items.filter(x=>!x.archived&&filters.every(([n,v])=>String(x.fields[field(b,n).name]??'').toLowerCase()===v.toLowerCase()));
     },
@@ -115,10 +136,11 @@ export function kanban({gh,columnField='Status'}) {
     },
     async add(o) {
       if(!/^[\w.-]+\/[\w.-]+$/.test(o.repo??'')||!o.title) throw Error('add needs --repo OWNER/REPO and --title');
+      const text=await body(o);
       const b=await read(o.board);
       const pre=[...(o.column?[[columnField,o.column]]:[]),...pairs(o.set)];
       for(const [name,value] of pre) editArgs(b,name,value);
-      const url=(await gh(['issue','create','--repo',o.repo,'--title',o.title,...(body(o)??['--body',''])])).trim().split('\n').pop();
+      const url=(await gh(['issue','create','--repo',o.repo,'--title',o.title,...(text?.args??['--body',''])],text?.input)).trim().split('\n').pop();
       const {id}=await json(['project','item-add',String(b.number),'--owner',b.owner,'--url',url,'--format','json']);
       return pre.length?setAll(b,id,pre):readback(id);
     },
@@ -131,10 +153,10 @@ export function kanban({gh,columnField='Status'}) {
       const b=await read(o.board);return setAll(b,find(b,ref).card,list);
     },
     async comment(o,[ref]) {
-      const text=body(o);if(!text) throw Error('comment needs --body or --body-file');
+      const text=await body(o);if(!text) throw Error('comment needs --body or --body-file');
       const card=find(await read(o.board),ref);
       if(card.type==='draft') throw Error('Draft cards take no comments; convert it to an issue');
-      const url=(await gh([card.type==='pr'?'pr':'issue','comment',card.url,...text])).trim();
+      const url=(await gh([card.type==='pr'?'pr':'issue','comment',card.url,...text.args],text.input)).trim();
       const id=/#issuecomment-(\d+)$/.exec(url)?.[1];
       if(!id) throw Error('Comment write returned no comment id');
       const saved=await json(['api',`repos/${card.ref.split('#')[0]}/issues/comments/${id}`]);
@@ -180,8 +202,13 @@ export function nativeGh() {
   const env={...process.env};
   for(const key of ['GH_TOKEN','GITHUB_TOKEN','GH_ENTERPRISE_TOKEN','GITHUB_ENTERPRISE_TOKEN']) delete env[key];
   const run=promisify(execFile);
-  return async args=>{
-    try {return (await run('gh',args,{env,maxBuffer:32*1024*1024,timeout:60000})).stdout;}
+  return async(args,input)=>{
+    try {
+      const call=run('gh',args,{env,maxBuffer:32*1024*1024,timeout:60000});
+      call.child.stdin.on('error',()=>{}); // gh may exit before reading its input
+      if(input!==undefined) call.child.stdin.end(input);
+      return (await call).stdout;
+    }
     catch(error) {throw Error((error.stderr||error.message||'gh failed').toString().trim().split('\n').pop());}
   };
 }

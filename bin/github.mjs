@@ -12,8 +12,8 @@ export function command(args) {
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   process.umask(0o077);
   const args=process.argv.slice(2);
-  if(args[0]==='--version') console.log('ez-github 0.1.0-beta.10');
-  else if(!args.length||args[0]==='--help') console.log('ez github doctor | gh <native arguments> | git <native arguments> | repos clone|list|reclaim\nPrivate repositories: /repos. Native stdin, output and exit codes. Clones are bounded: see ez github repos --help. Read skills/github/SKILL.md for OAuth onboarding.');
+  if(args[0]==='--version') console.log('ez-github 0.1.0-beta.11');
+  else if(!args.length||args[0]==='--help') console.log('ez github doctor | gh <native arguments> | git <native arguments> | repos clone|list|reclaim|publish\nPrivate repositories: /repos. Native stdin, output and exit codes. Clones are bounded: see ez github repos --help. Read skills/github/SKILL.md for OAuth onboarding.');
   else if(args[0]==='repos') {
     try {await repos(args.slice(1));} catch(error) {console.error(error.message);process.exitCode=1;}
   } else {

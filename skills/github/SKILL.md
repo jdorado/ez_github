@@ -37,6 +37,13 @@ it and run `git add --sparse FILE`; to read or edit existing files, clone with `
 or run `git sparse-checkout add DIR` in the clone. Use plain `git clone` only when the
 whole tree is needed.
 
+To publish files as a pull request without a clone, pipe a JSON bundle to
+`ez github repos publish OWNER/REPO --branch B --title T [--base BASE]`:
+`{"files":[{"path":"docs/a.md","content":"text"}],"body":"optional pull request text"}` (`"encoding":"base64"` for binary; the body is never an argument). It creates or
+updates the branch, writes the files, compares each stored file's bytes with the input, and opens or
+reuses the pull request, printing one JSON result (`url`, `number`, `branch`, files with blob `sha`).
+It fails non-zero on a conflict or a readback difference and never retries, merges or resolves.
+
 `/repos` is bounded. Every `git clone` or `gh repo clone` first removes clones idle for
 24 hours that are clean (no uncommitted, untracked or ignored files; regenerable caches such
 as `__pycache__` and `node_modules` excepted), have no stash, submodules or embedded

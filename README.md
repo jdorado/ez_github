@@ -4,8 +4,8 @@ Thin native GitHub CLI and Git plugin for Ez. Private per-agent profile and writ
 repository volume; no provider API implementation or workflow engine.
 
 Requires Node 22+, Docker/Compose and Ez with the cancellation fix (manager release
-0.1.0-beta.60 or newer). Obtain `@jc_stack/ez-github@0.1.0-beta.10` with
-`npm pack @jc_stack/ez-github@0.1.0-beta.10 --ignore-scripts`, extract into a permanent
+0.1.0-beta.60 or newer). Obtain `@jc_stack/ez-github@0.1.0-beta.11` with
+`npm pack @jc_stack/ez-github@0.1.0-beta.11 --ignore-scripts`, extract into a permanent
 private tools directory, and inspect the extracted package.
 
 Inspect this directory with `ez plugins inspect github --source /absolute/package`,
@@ -58,6 +58,17 @@ data repository (2.3 GiB each) accumulated to 91 GiB. The plugin now bounds the 
   `/repos` is over its budget (default 16 GiB; set `EZ_GITHUB_REPOS_BUDGET_GIB` in the
   service environment to change it). This is a bound, not a security boundary.
 
+## Publish files as a pull request
+
+`ez github repos publish OWNER/REPO --branch B --title T [--base BASE] < bundle.json`
+takes the files as a JSON bundle on stdin (`{"files":[{"path":"docs/a.md","content":"text"}],"body":"optional pull request text"}`, with
+`"encoding":"base64"` for binary), so no host path is needed. It creates the branch from the base
+(default: the repository's default branch) or writes onto it, one contents-API commit per changed file,
+reads every stored file back and compares its bytes, then opens the pull request or reuses the open
+one for the branch, and prints `url`, `number`, `created`, `branch`, `base` and each file's `path` and blob `sha`.
+A write that conflicts with a changed branch, or a readback that differs, exits 1; nothing is retried,
+merged or resolved. Files over 1 MB cannot be read back.
+
 ## Kanban
 
 `ez kanban` gives agents basic task-board operations: `board`, `list`, `show`,
@@ -66,7 +77,9 @@ write. The verbs are tracker-neutral; this adapter stores the board in a GitHub
 Project through the private profile, so another tracker can later provide the
 same commands. It holds no workflow rules. Example:
 `ez kanban list --board OWNER/NUMBER --column Ready`. The login needs the
-`project` scope. See skills/kanban/SKILL.md.
+`project` scope. `board` and `list` fail unless the items read equal the Project's
+`totalCount` (other verbs only look for one card), and `--body-file`
+on `add`/`comment` is read by the plugin (`-` reads stdin). See skills/kanban/SKILL.md.
 
 ## Read-only work queue preflight
 
