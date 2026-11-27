@@ -48,13 +48,11 @@ const board=()=>fakeGh([item('PVTI_1',1,[value('Status',{name:'Backlog'}),value(
 
 test('list reads every page and filters by column and field',async()=>{
   const {gh}=board(),k=kanban({gh});
-  const all=await k.list({board:'o/2'});
-  assert.deepEqual([all.read,all.totalCount,all.count,all.items.length],[2,2,2,2]);
+  assert.equal((await k.list({board:'o/2'})).length,2);
   const ready=await k.list({board:'o/2',column:'ready'});
-  assert.deepEqual([ready.read,ready.totalCount,ready.count],[2,2,1]);
-  assert.deepEqual(ready.items.map(x=>x.ref),['o/r#2']);
+  assert.deepEqual(ready.map(x=>x.ref),['o/r#2']);
   const cio=await k.list({board:'o/2',field:['Role=CIO']});
-  assert.deepEqual(cio.items[0],{card:'PVTI_1',type:'issue',ref:'o/r#1',url:'https://github.com/o/r/issues/1',title:'Task 1',state:'open',archived:false,fields:{Status:'Backlog','Due date':'2026-10-16',Role:'CIO'}});
+  assert.deepEqual(cio[0],{card:'PVTI_1',type:'issue',ref:'o/r#1',url:'https://github.com/o/r/issues/1',title:'Task 1',state:'open',archived:false,fields:{Status:'Backlog','Due date':'2026-10-16',Role:'CIO'}});
 });
 test('board lists columns and fields',async()=>{
   const out=await kanban({gh:board().gh}).board({board:'o/2'});

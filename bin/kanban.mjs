@@ -20,7 +20,7 @@ const BOARD=`query($owner:String!,$number:Int!,$after:String){repositoryOwner(lo
 const NODE=`query($id:ID!){node(id:$id){...I}} ${ITEM}`;
 export const HELP=`ez kanban <command> --board OWNER/NUMBER [options]
   board                         columns and fields
-  list [--column C] [--field NAME=VALUE]...   {read,totalCount,count,items}: cards (no bodies)
+  list [--column C] [--field NAME=VALUE]...   cards (no bodies)
   show CARD                     card with body and comments
   add --repo OWNER/REPO --title T [--body T | --body-file F|-] [--column C] [--set NAME=VALUE]...
   move CARD COLUMN              change the card's column, read back
@@ -125,8 +125,7 @@ export function kanban({gh,columnField='Status',stdin=readStdin}) {
     async list(o) {
       const b=await read(o.board),filters=pairs(o.field);
       if(o.column) filters.push([columnField,o.column]);
-      const items=b.items.filter(x=>!x.archived&&filters.every(([n,v])=>String(x.fields[field(b,n).name]??'').toLowerCase()===v.toLowerCase()));
-      return {read:b.items.length,totalCount:b.totalCount,count:items.length,items};
+      return b.items.filter(x=>!x.archived&&filters.every(([n,v])=>String(x.fields[field(b,n).name]??'').toLowerCase()===v.toLowerCase()));
     },
     async show(o,[ref]) {
       const card=find(await read(o.board),ref);

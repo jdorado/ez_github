@@ -67,7 +67,7 @@ Project through the private profile, so another tracker can later provide the
 same commands. It holds no workflow rules. Example:
 `ez kanban list --board OWNER/NUMBER --column Ready`. The login needs the
 `project` scope. A board read fails unless the items read equal the Project's
-`totalCount` (`list` prints `{read,totalCount,count,items}`), and `--body-file`
+`totalCount`, and `--body-file`
 on `add`/`comment` is read by the plugin (`-` reads stdin). See skills/kanban/SKILL.md.
 
 ## Read-only work queue preflight

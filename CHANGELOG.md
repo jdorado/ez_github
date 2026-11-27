@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- `kanban` no longer returns part of a board without saying so. Every command that reads the board compares the items it read with the Project's `totalCount` and exits 1 with both numbers when they differ; a failed page already exited 1, and a card with more than 100 field values (read limit raised from 50) or a board with more than 100 fields now fails the read instead of losing fields. **`list` now prints `{read,totalCount,count,items}` instead of a bare array**, and `board` adds `read` and `totalCount`.
+- `kanban` no longer returns part of a board without saying so. Every command that reads the board compares the items it read with the Project's `totalCount` and exits 1 with both numbers when they differ; a failed page already exited 1, and a card with more than 100 field values (read limit raised from 50) or a board with more than 100 fields now fails the read instead of losing fields. `board` adds `read` and `totalCount`; `list` keeps printing a bare array, so the error is its only signal (putting the counts in the `list` result was withdrawn because it would break every caller).
 - `kanban add` and `comment` read `--body-file` in the plugin and send the text to `gh` on stdin, so a long body needs neither an argument nor a path `gh` can see. An unreadable or empty file is an error and nothing is posted; `--body-file -` reads stdin.
 
 ## 0.1.0-beta.10
