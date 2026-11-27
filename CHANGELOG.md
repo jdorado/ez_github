@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `kanban` no longer returns part of a board without saying so. Every command that reads the board compares the items it read with the Project's `totalCount` and exits 1 with both numbers when they differ; a failed page already exited 1, and a card with more than 100 field values (read limit raised from 50) or a board with more than 100 fields now fails the read instead of losing fields. **`list` now prints `{read,totalCount,count,items}` instead of a bare array**, and `board` adds `read` and `totalCount`.
+- `kanban add` and `comment` read `--body-file` in the plugin and send the text to `gh` on stdin, so a long body needs neither an argument nor a path `gh` can see. An unreadable or empty file is an error and nothing is posted; `--body-file -` reads stdin.
+
 ## 0.1.0-beta.10
 
 - Add `kanban claim CARD --by WHO --from COLUMN --to COLUMN [--note T]`, so that when two workers take the same card at once exactly one proceeds. GitHub Projects have no compare-and-set, so the claim is decided by the comment thread: `claim` checks the card is in `--from`, posts a claim comment, reads the claim comments made since the card last changed and moves the card to `--to` only if its own has the lowest comment id (ids only grow, so every claimant reaches the same answer). The other prints `{"claimed":false,"reason":"lost","winner":...}` and exits 3 with `winnerAgeSeconds` (the winning claim's age on GitHub's clock, so an old one shows a winner that died before moving the card; any field change on the card releases it); a card already moved prints `not-in-column`. Cards now show `updatedAt` in `list`, `show` and write output. Before this, a claim was `move` plus a hand-written comment with no check that it won, and two Lane 5 workers claimed one card in the same second and both ran it in full.

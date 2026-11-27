@@ -9,18 +9,18 @@ import {promisify} from 'node:util';
 import {parseArgs} from 'node:util';
 import {pathToFileURL} from 'node:url';
 
-const ITEM=`fragment I on ProjectV2Item{id isArchived updatedAt content{__typename ...on Issue{number title url state repository{nameWithOwner}} ...on PullRequest{number title url prState:state repository{nameWithOwner}} ...on DraftIssue{title}} fieldValues(first:50){nodes{
+const ITEM=`fragment I on ProjectV2Item{id isArchived updatedAt content{__typename ...on Issue{number title url state repository{nameWithOwner}} ...on PullRequest{number title url prState:state repository{nameWithOwner}} ...on DraftIssue{title}} fieldValues(first:100){pageInfo{hasNextPage} nodes{
 ...on ProjectV2ItemFieldSingleSelectValue{name field{...on ProjectV2FieldCommon{name}}}
 ...on ProjectV2ItemFieldTextValue{text field{...on ProjectV2FieldCommon{name}}}
 ...on ProjectV2ItemFieldDateValue{date field{...on ProjectV2FieldCommon{name}}}
 ...on ProjectV2ItemFieldNumberValue{number field{...on ProjectV2FieldCommon{name}}}
 ...on ProjectV2ItemFieldIterationValue{title field{...on ProjectV2FieldCommon{name}}}}}}`;
-const PROJECT=`fragment P on ProjectV2{id title fields(first:100){nodes{...on ProjectV2FieldCommon{id name dataType} ...on ProjectV2SingleSelectField{options{id name}}}} items(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{...I}}}`;
+const PROJECT=`fragment P on ProjectV2{id title fields(first:100){pageInfo{hasNextPage} nodes{...on ProjectV2FieldCommon{id name dataType} ...on ProjectV2SingleSelectField{options{id name}}}} items(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{...I}}}`;
 const BOARD=`query($owner:String!,$number:Int!,$after:String){repositoryOwner(login:$owner){...on User{projectV2(number:$number){...P}} ...on Organization{projectV2(number:$number){...P}}}} ${PROJECT} ${ITEM}`;
 const NODE=`query($id:ID!){node(id:$id){...I}} ${ITEM}`;
 export const HELP=`ez kanban <command> --board OWNER/NUMBER [options]
   board                         columns and fields
-  list [--column C] [--field NAME=VALUE]...   cards (no bodies)
+  list [--column C] [--field NAME=VALUE]...   {read,totalCount,count,items}: cards (no bodies)
   show CARD                     card with body and comments
   add --repo OWNER/REPO --title T [--body T | --body-file F|-] [--column C] [--set NAME=VALUE]...
   move CARD COLUMN              change the card's column, read back
@@ -30,7 +30,8 @@ export const HELP=`ez kanban <command> --board OWNER/NUMBER [options]
 CARD is the card id from list, OWNER/REPO#N or the issue/PR URL. --column-field
 names the column field (default Status). --body-file is read by this command (a missing, unreadable or
 empty file is an error; F must be a path this command can see, - reads stdin), so a long body needs no argument.
-Output is JSON; errors exit 1. claim exits 3 when another
+Reading a board fails (exit 1) unless
+the items read equal the Project's totalCount. Output is JSON; errors exit 1. claim exits 3 when another
 worker holds the card ({"claimed":false}): leave that card alone and pick another. A lost claim
 reports winnerAgeSeconds, how long ago the winning claim was posted.`;
 
@@ -58,16 +59,21 @@ export function kanban({gh,columnField='Status',stdin=readStdin}) {
     return value.data;
   };
   const read=async board=>{
-    const {owner,number}=parseBoard(board);let after,project,items=[];
+    const {owner,number}=parseBoard(board);let after,project,items=[],totalCount;
     do {
       const data=await gql(BOARD,{owner,number,...(after?{after}:{})});
       project=data.repositoryOwner?.projectV2;
       if(!project) throw Error(`Board ${board} not found or not readable`);
-      items.push(...project.items.nodes);
+      items.push(...project.items.nodes);totalCount=project.items.totalCount;
       after=project.items.pageInfo.hasNextPage?project.items.pageInfo.endCursor:null;
     } while(after);
+    // Never hand back part of a board as the whole: the items read must equal the Project's own count.
+    if(items.length!==totalCount) throw Error(`Board ${board}: read ${items.length} of ${totalCount} items`);
+    if(project.fields.pageInfo.hasNextPage) throw Error(`Board ${board} has more than 100 fields; not all were read`);
+    const over=items.find(x=>x?.fieldValues?.pageInfo?.hasNextPage);
+    if(over) throw Error(`Board ${board}: item ${over.id} has more than 100 field values; not all were read`);
     const fields=project.fields.nodes.filter(f=>f?.name);
-    return {owner,number,id:project.id,title:project.title,fields,items:items.map(plain)};
+    return {owner,number,id:project.id,title:project.title,totalCount,fields,items:items.map(plain)};
   };
   const field=(b,name)=>{const f=b.fields.find(x=>x.name.toLowerCase()===name.toLowerCase());if(!f) throw Error(`No field "${name}" on this board`);return f;};
   const find=(b,ref)=>{
@@ -115,11 +121,12 @@ export function kanban({gh,columnField='Status',stdin=readStdin}) {
     return {args:['--body-file','-'],input:text};
   };
   return {
-    async board(o) {const b=await read(o.board);return {board:o.board,title:b.title,columns:field(b,columnField).options?.map(x=>x.name)??[],fields:b.fields.map(f=>({name:f.name,type:f.dataType.toLowerCase(),...(f.options?{options:f.options.map(x=>x.name)}:{})}))};},
+    async board(o) {const b=await read(o.board);return {board:o.board,title:b.title,read:b.items.length,totalCount:b.totalCount,columns:field(b,columnField).options?.map(x=>x.name)??[],fields:b.fields.map(f=>({name:f.name,type:f.dataType.toLowerCase(),...(f.options?{options:f.options.map(x=>x.name)}:{})}))};},
     async list(o) {
       const b=await read(o.board),filters=pairs(o.field);
       if(o.column) filters.push([columnField,o.column]);
-      return b.items.filter(x=>!x.archived&&filters.every(([n,v])=>String(x.fields[field(b,n).name]??'').toLowerCase()===v.toLowerCase()));
+      const items=b.items.filter(x=>!x.archived&&filters.every(([n,v])=>String(x.fields[field(b,n).name]??'').toLowerCase()===v.toLowerCase()));
+      return {read:b.items.length,totalCount:b.totalCount,count:items.length,items};
     },
     async show(o,[ref]) {
       const card=find(await read(o.board),ref);

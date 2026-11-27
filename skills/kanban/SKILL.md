@@ -18,6 +18,13 @@ ez kanban comment --board OWNER/NUMBER OWNER/REPO#12 --body "Done: PR #40 merged
 ez kanban claim --board OWNER/NUMBER OWNER/REPO#12 --by "worker, model, run" --from Ready --to "In Progress"
 ```
 
+`list` prints `{read,totalCount,count,items}`: `read` is how many cards were read from the Project,
+`totalCount` is the Project's own count, `count` is what your filters kept. A read that is not the
+whole board (the two differ, a page fails, or a card has more field values than were read) exits 1
+with the numbers; it never returns part of a board. `--body-file F` (on `add` and `comment`) is read
+by the command itself, so F must be a path it can see; `--body-file -` reads stdin, which suits a
+long body. An unreadable or empty body is an error and nothing is posted.
+
 The board is the shared task list; the workspace's own instructions say which
 board, which columns and what each field means. The tool keeps no workflow
 rules: deciding when a card is ready, who takes it and when it is done is the

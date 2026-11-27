@@ -22,7 +22,7 @@ function fakeGh(items) {
       const query=args.find(a=>a.startsWith('query=')),after=args.find(a=>a.startsWith('after='));
       if(query.includes('node(id:')) {const id=args.find(a=>a.startsWith('id=')).slice(3);return JSON.stringify({data:{node:state.find(x=>x.id===id)}});}
       const page=after?state.slice(1):state.slice(0,1);
-      return JSON.stringify({data:{repositoryOwner:{projectV2:{id:'PVT_1',title:'Board',fields:{nodes:FIELDS},items:{pageInfo:{hasNextPage:!after&&state.length>1,endCursor:'c1'},nodes:page}}}}});
+      return JSON.stringify({data:{repositoryOwner:{projectV2:{id:'PVT_1',title:'Board',fields:{pageInfo:{hasNextPage:false},nodes:FIELDS},items:{totalCount:state.length,pageInfo:{hasNextPage:!after&&state.length>1,endCursor:'c1'},nodes:page}}}}});
     }
     if(args[0]==='project'&&args[1]==='item-edit') {
       const it=state.find(x=>x.id===args[args.indexOf('--id')+1]),f=FIELDS.find(x=>x.id===args[args.indexOf('--field-id')+1]);
@@ -48,11 +48,13 @@ const board=()=>fakeGh([item('PVTI_1',1,[value('Status',{name:'Backlog'}),value(
 
 test('list reads every page and filters by column and field',async()=>{
   const {gh}=board(),k=kanban({gh});
-  assert.equal((await k.list({board:'o/2'})).length,2);
+  const all=await k.list({board:'o/2'});
+  assert.deepEqual([all.read,all.totalCount,all.count,all.items.length],[2,2,2,2]);
   const ready=await k.list({board:'o/2',column:'ready'});
-  assert.deepEqual(ready.map(x=>x.ref),['o/r#2']);
+  assert.deepEqual([ready.read,ready.totalCount,ready.count],[2,2,1]);
+  assert.deepEqual(ready.items.map(x=>x.ref),['o/r#2']);
   const cio=await k.list({board:'o/2',field:['Role=CIO']});
-  assert.deepEqual(cio[0],{card:'PVTI_1',type:'issue',ref:'o/r#1',url:'https://github.com/o/r/issues/1',title:'Task 1',state:'open',archived:false,fields:{Status:'Backlog','Due date':'2026-10-16',Role:'CIO'}});
+  assert.deepEqual(cio.items[0],{card:'PVTI_1',type:'issue',ref:'o/r#1',url:'https://github.com/o/r/issues/1',title:'Task 1',state:'open',archived:false,fields:{Status:'Backlog','Due date':'2026-10-16',Role:'CIO'}});
 });
 test('board lists columns and fields',async()=>{
   const out=await kanban({gh:board().gh}).board({board:'o/2'});
@@ -204,4 +206,26 @@ test('--body-file is read by the plugin and sent to gh on stdin; stdin works wit
   }
   await assert.rejects(kanban({gh,stdin:async()=>''}).comment({board:'o/2','body-file':'-'},['PVTI_1']),/stdin is empty/);
   assert.equal(calls.length,before);
+});
+
+// A board read that is not the whole board fails loudly instead of returning part of it.
+const tamper=change=>async(args,input)=>{
+  const out=await board().gh(args,input);
+  if(args[0]!=='api'||!args.find(a=>a.startsWith('query=')).includes('items(first:100')) return out;
+  const value=JSON.parse(out);change(value.data.repositoryOwner.projectV2);return JSON.stringify(value);
+};
+test('a board read fails unless the items read equal the Project count, and says both numbers',async()=>{
+  const {gh}=board();
+  const out=await kanban({gh}).board({board:'o/2'});
+  assert.deepEqual([out.read,out.totalCount],[2,2]);
+  const short=tamper(p=>{p.items.totalCount=5;});
+  await assert.rejects(kanban({gh:short}).list({board:'o/2'}),/read 2 of 5 items/);
+  await assert.rejects(kanban({gh:short}).move({board:'o/2'},['o/r#1','Ready']),/read 2 of 5 items/);
+  const failing=async args=>{if(args[0]==='api'&&args.some(a=>a==='after=c1')) throw Error('HTTP 502');return gh(args);};
+  await assert.rejects(kanban({gh:failing}).list({board:'o/2'}),/HTTP 502/);
+});
+test('an item with more field values than were read fails the read',async()=>{
+  const {gh}=board();
+  const more=tamper(p=>{p.items.nodes[0].fieldValues.pageInfo={hasNextPage:true};});
+  await assert.rejects(kanban({gh:more}).list({board:'o/2'}),/item PVTI_1 has more than 100 field values/);
 });
