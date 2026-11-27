@@ -18,9 +18,10 @@ ez kanban comment --board OWNER/NUMBER OWNER/REPO#12 --body "Done: PR #40 merged
 ez kanban claim --board OWNER/NUMBER OWNER/REPO#12 --by "worker, model, run" --from Ready --to "In Progress"
 ```
 
-A read that is not the whole board (the items read differ from the Project's `totalCount`, a page
-fails, or a card has more field values than were read) exits 1 with the numbers; `list` never
-returns part of a board. `--body-file F` (on `add` and `comment`) is read
+`board` and `list` exit 1 with the numbers when the items read differ from the Project's `totalCount`,
+so they never return part of a board; verbs that read the board only to find one card (`show`, `move`,
+`set`, `comment`, `claim`, `add`) are not failed by a count difference (a card they cannot find is an
+error). Everywhere, a failed page, or a card with more field values than were read, exits 1. `--body-file F` (on `add` and `comment`) is read
 by the command itself, so F must be a path it can see; `--body-file -` reads stdin, which suits a
 long body. An unreadable or empty body is an error and nothing is posted.
 

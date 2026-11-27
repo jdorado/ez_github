@@ -188,6 +188,7 @@ export async function cloneRepo(argv, dir = reposDir()) {
 // publish: files arrive as JSON on stdin (the container cannot see the caller's files). One contents-API write per file
 // (one commit each, no tree plumbing; a stale write fails with 409 instead of overwriting), then a readback of every
 // stored file before the pull request is opened or reused. The bundle is {"files":[{"path","content","encoding"?}],"body"?}; the pull request body travels in it, never as an argument.
+const MAX_READBACK = 1_000_000;
 const blobSha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 
 export function nativeGh() {
@@ -212,7 +213,10 @@ export async function publish(argv, stdin, gh = nativeGh()) {
   const files = (Array.isArray(bundle?.files) ? bundle.files : []).map(file => {
     const encoding = file?.encoding ?? 'utf8';
     if (!safePath(file?.path) || typeof file.content !== 'string' || !['utf8', 'base64'].includes(encoding)) throw Error('Each file needs a relative "path", a string "content" and an optional "encoding" of utf8 or base64');
-    return {path: file.path, bytes: Buffer.from(file.content, encoding)};
+    const bytes = Buffer.from(file.content, encoding);
+    if (encoding === 'base64' && bytes.toString('base64') !== file.content) throw Error(`${file.path}: content is not valid base64`);
+    if (bytes.length > MAX_READBACK) throw Error(`${file.path} is ${bytes.length} bytes; the contents API returns at most 1 MB, so it could never be read back. Nothing was written`);
+    return {path: file.path, bytes};
   });
   if (!files.length || new Set(files.map(file => file.path)).size !== files.length) throw Error('The bundle needs one or more files with distinct paths');
 
@@ -220,28 +224,37 @@ export async function publish(argv, stdin, gh = nativeGh()) {
   const get = async path => JSON.parse(await gh(['api', `${api}/${path}`]));
   const missing = promise => promise.catch(error => { if (error.status === 404) return null; throw error; });
   const base = values.base ?? JSON.parse(await gh(['api', api])).default_branch;
-  if (!(await missing(get(`git/ref/heads/${branch}`)))) {
-    const sha = (await get(`git/ref/heads/${base}`)).object.sha;
+  if (branch === base) throw Error(`--branch ${branch} is the base branch; publish to a separate branch. Nothing was written`);
+  const ref = name => `git/ref/heads/${name.split('/').map(encodeURIComponent).join('/')}`;
+  if (!(await missing(get(ref(branch))))) {
+    const sha = (await get(ref(base))).object.sha;
     await gh(['api', '-X', 'POST', `${api}/git/refs`, '--input', '-'], JSON.stringify({ref: `refs/heads/${branch}`, sha}));
   }
   const file = path => path.split('/').map(encodeURIComponent).join('/');
   const stored = path => missing(get(`contents/${file(path)}?ref=${encodeURIComponent(branch)}`));
-  for (const {path, bytes} of files) {
-    const current = await stored(path);
-    if (current?.sha === blobSha(bytes)) continue; // already stored
-    try { await put(`contents/${file(path)}`, {message: title, content: bytes.toString('base64'), branch, ...(current ? {sha: current.sha} : {})}); } catch (error) {
-      throw Error(error.status === 409 || error.status === 422 ? `Conflict writing ${path} on ${branch}: the branch changed since it was read; nothing was retried (${error.message})` : `Writing ${path} on ${branch} failed: ${error.message}`);
+  const written = [];
+  try {
+    for (const {path, bytes} of files) {
+      const current = await stored(path);
+      if (current?.sha === blobSha(bytes)) continue; // already stored
+      try { await put(`contents/${file(path)}`, {message: title, content: bytes.toString('base64'), branch, ...(current ? {sha: current.sha} : {})}); } catch (error) {
+        throw Error(error.status === 409 ? `Conflict writing ${path} on ${branch}: the branch changed since it was read; nothing was retried (${error.message})`
+          : error.status === 422 ? `GitHub rejected writing ${path} on ${branch} (HTTP 422): ${error.message}` : `Writing ${path} on ${branch} failed: ${error.message}`);
+      }
+      written.push(path);
     }
+    const readback = [];
+    for (const {path, bytes} of files) {
+      const now = await stored(path);
+      if (!now || now.encoding !== 'base64' || !Buffer.from(now.content, 'base64').equals(bytes)) throw Error(`Readback of ${path} on ${branch} differs from the input`);
+      readback.push({path, sha: now.sha});
+    }
+    const [open] = JSON.parse(await gh(['api', `${api}/pulls?state=open&head=${encodeURIComponent(`${repo.split('/')[0]}:${branch}`)}`]));
+    const pr = open ?? JSON.parse(await gh(['api', '-X', 'POST', `${api}/pulls`, '--input', '-'], JSON.stringify({title, head: branch, base, ...(typeof bundle.body === 'string' ? {body: bundle.body} : {})})));
+    return {url: pr.html_url, number: pr.number, created: !open, branch, base: pr.base?.ref ?? base, files: readback};
+  } catch (error) {
+    throw Error(written.length ? `${error.message}. Already written on ${branch}: ${written.join(', ')}` : error.message);
   }
-  const readback = [];
-  for (const {path, bytes} of files) {
-    const now = await stored(path);
-    if (!now || now.encoding !== 'base64' || !Buffer.from(now.content, 'base64').equals(bytes)) throw Error(`Readback of ${path} on ${branch} differs from the input (files over 1 MB cannot be read back)`);
-    readback.push({path, sha: now.sha});
-  }
-  const [open] = JSON.parse(await gh(['api', `${api}/pulls?state=open&head=${encodeURIComponent(`${repo.split('/')[0]}:${branch}`)}`]));
-  const pr = open ?? JSON.parse(await gh(['api', '-X', 'POST', `${api}/pulls`, '--input', '-'], JSON.stringify({title, head: branch, base, ...(typeof bundle.body === 'string' ? {body: bundle.body} : {})})));
-  return {url: pr.html_url, number: pr.number, created: !open, branch, base: pr.base?.ref ?? base, files: readback};
 }
 
 export const HELP = `ez github repos clone OWNER/REPO|URL [NAME] [--path DIR]... [--branch BRANCH]
@@ -252,7 +265,7 @@ ez github repos list [--idle-hours N]
 ez github repos reclaim [--idle-hours N]
   Removes clones idle for N hours (default ${DEFAULT_IDLE_HOURS}) with no uncommitted, untracked or ignored files (regenerable caches excepted), no stash, no submodules or embedded repositories, and every local branch commit (and HEAD) reachable from a remote-tracking ref. The remote is not re-checked, so a branch deleted there after its push still counts as pushed. Tags are not considered. Anything else is kept.
 ez github repos publish OWNER/REPO --branch BRANCH --title TITLE [--base BASE] < bundle.json
-  Bundle on stdin: {"body":"pull request text (optional)","files":[{"path":"docs/a.md","content":"text"},{"path":"b.bin","content":"<base64>","encoding":"base64"}]}. Creates BRANCH from BASE (default: the repository's default branch) or writes onto it if it exists, one commit per changed file (message: TITLE), reads every stored file back and compares its bytes, then opens the pull request or reuses the open one for BRANCH. JSON: url, number, created, branch, base, files (path, blob sha). Exits 1 on a conflict, a readback difference or any failure; nothing is retried, merged or resolved. Files over 1 MB cannot be read back.
+  Bundle on stdin: {"body":"pull request text (optional)","files":[{"path":"docs/a.md","content":"text"},{"path":"b.bin","content":"<base64>","encoding":"base64"}]}. Creates BRANCH from BASE (default: the repository's default branch) or writes onto it if it exists, one commit per changed file (message: TITLE), reads every stored file back and compares its bytes, then opens the pull request or reuses the open one for BRANCH. JSON: url, number, created, branch, base, files (path, blob sha). Exits 1 on a conflict, a readback difference or any failure; nothing is retried, merged or resolved. Files over 1 MB (1,000,000 bytes) are refused before any write; the branch must not be the base. On a failure after writes, the error names the paths already written.
 Every git clone and gh repo clone through this plugin first reclaims, then fails when /repos is over its budget (default ${DEFAULT_BUDGET_GIB} GiB, EZ_GITHUB_REPOS_BUDGET_GIB).`;
 
 const stdinText = async () => { const chunks = []; for await (const chunk of process.stdin) chunks.push(chunk); return Buffer.concat(chunks).toString('utf8'); };

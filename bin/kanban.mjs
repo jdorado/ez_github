@@ -30,8 +30,8 @@ export const HELP=`ez kanban <command> --board OWNER/NUMBER [options]
 CARD is the card id from list, OWNER/REPO#N or the issue/PR URL. --column-field
 names the column field (default Status). --body-file is read by this command (a missing, unreadable or
 empty file is an error; F must be a path this command can see, - reads stdin), so a long body needs no argument.
-Reading a board fails (exit 1) unless
-the items read equal the Project's totalCount. Output is JSON; errors exit 1. claim exits 3 when another
+board and list fail (exit 1) unless
+the items read equal the Project's totalCount; other verbs only read the board to find a card. Output is JSON; errors exit 1. claim exits 3 when another
 worker holds the card ({"claimed":false}): leave that card alone and pick another. A lost claim
 reports winnerAgeSeconds, how long ago the winning claim was posted.`;
 
@@ -58,7 +58,7 @@ export function kanban({gh,columnField='Status',stdin=readStdin}) {
     if(value.errors?.length) throw Error(`GitHub: ${value.errors[0].message}`);
     return value.data;
   };
-  const read=async board=>{
+  const read=async(board,{whole=false}={})=>{
     const {owner,number}=parseBoard(board);let after,project,items=[],totalCount;
     do {
       const data=await gql(BOARD,{owner,number,...(after?{after}:{})});
@@ -67,8 +67,9 @@ export function kanban({gh,columnField='Status',stdin=readStdin}) {
       items.push(...project.items.nodes);totalCount=project.items.totalCount;
       after=project.items.pageInfo.hasNextPage?project.items.pageInfo.endCursor:null;
     } while(after);
-    // Never hand back part of a board as the whole: the items read must equal the Project's own count.
-    if(items.length!==totalCount) throw Error(`Board ${board}: read ${items.length} of ${totalCount} items`);
+    // `board` and `list` print the board itself, so they must never hand back part of it as the whole; a verb that
+    // only looks for one card is not failed by a card someone else added during the read (a missing card is already an error).
+    if(whole&&items.length!==totalCount) throw Error(`Board ${board}: read ${items.length} of ${totalCount} items`);
     if(project.fields.pageInfo.hasNextPage) throw Error(`Board ${board} has more than 100 fields; not all were read`);
     const over=items.find(x=>x?.fieldValues?.pageInfo?.hasNextPage);
     if(over) throw Error(`Board ${board}: item ${over.id} has more than 100 field values; not all were read`);
@@ -121,9 +122,9 @@ export function kanban({gh,columnField='Status',stdin=readStdin}) {
     return {args:['--body-file','-'],input:text};
   };
   return {
-    async board(o) {const b=await read(o.board);return {board:o.board,title:b.title,read:b.items.length,totalCount:b.totalCount,columns:field(b,columnField).options?.map(x=>x.name)??[],fields:b.fields.map(f=>({name:f.name,type:f.dataType.toLowerCase(),...(f.options?{options:f.options.map(x=>x.name)}:{})}))};},
+    async board(o) {const b=await read(o.board,{whole:true});return {board:o.board,title:b.title,read:b.items.length,totalCount:b.totalCount,columns:field(b,columnField).options?.map(x=>x.name)??[],fields:b.fields.map(f=>({name:f.name,type:f.dataType.toLowerCase(),...(f.options?{options:f.options.map(x=>x.name)}:{})}))};},
     async list(o) {
-      const b=await read(o.board),filters=pairs(o.field);
+      const b=await read(o.board,{whole:true}),filters=pairs(o.field);
       if(o.column) filters.push([columnField,o.column]);
       return b.items.filter(x=>!x.archived&&filters.every(([n,v])=>String(x.fields[field(b,n).name]??'').toLowerCase()===v.toLowerCase()));
     },
@@ -204,6 +205,7 @@ export function nativeGh() {
   return async(args,input)=>{
     try {
       const call=run('gh',args,{env,maxBuffer:32*1024*1024,timeout:60000});
+      call.child.stdin.on('error',()=>{}); // gh may exit before reading its input
       if(input!==undefined) call.child.stdin.end(input);
       return (await call).stdout;
     }

@@ -207,18 +207,20 @@ test('--body-file is read by the plugin and sent to gh on stdin; stdin works wit
 });
 
 // A board read that is not the whole board fails loudly instead of returning part of it.
-const tamper=change=>async(args,input)=>{
-  const out=await board().gh(args,input);
+const tamper=change=>{const inner=board().gh;return async(args,input)=>{
+  const out=await inner(args,input);
   if(args[0]!=='api'||!args.find(a=>a.startsWith('query=')).includes('items(first:100')) return out;
   const value=JSON.parse(out);change(value.data.repositoryOwner.projectV2);return JSON.stringify(value);
-};
-test('a board read fails unless the items read equal the Project count, and says both numbers',async()=>{
+};};
+test('board and list fail unless the items read equal the Project count; verbs that look for one card do not',async()=>{
   const {gh}=board();
   const out=await kanban({gh}).board({board:'o/2'});
   assert.deepEqual([out.read,out.totalCount],[2,2]);
   const short=tamper(p=>{p.items.totalCount=5;});
   await assert.rejects(kanban({gh:short}).list({board:'o/2'}),/read 2 of 5 items/);
-  await assert.rejects(kanban({gh:short}).move({board:'o/2'},['o/r#1','Ready']),/read 2 of 5 items/);
+  await assert.rejects(kanban({gh:short}).board({board:'o/2'}),/read 2 of 5 items/);
+  assert.equal((await kanban({gh:short}).move({board:'o/2'},['o/r#1','Ready'])).fields.Status,'Ready');
+  await assert.rejects(kanban({gh:short}).show({board:'o/2'},['o/r#99']),/is not on this board/);
   const failing=async args=>{if(args[0]==='api'&&args.some(a=>a==='after=c1')) throw Error('HTTP 502');return gh(args);};
   await assert.rejects(kanban({gh:failing}).list({board:'o/2'}),/HTTP 502/);
 });

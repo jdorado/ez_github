@@ -10,17 +10,19 @@ const fail = (status, message) => Object.assign(Error(message), {status});
 
 // A fake GitHub behind `gh api`: branches (name -> {file path -> bytes}), pull requests, and an optional hook per PUT.
 function fakeGh({branches = {main: {'README.md': Buffer.from('root\n')}}, prs = [], onPut, corrupt} = {}) {
-  const state = {branches: structuredClone(branches), prs: [...prs], puts: [], posts: []};
+  const state = {branches: structuredClone(branches), prs: [...prs], puts: [], posts: [], routes: []};
   for (const [name, files] of Object.entries(state.branches)) for (const path of Object.keys(files)) files[path] = Buffer.from(files[path]);
   const gh = async (args, input) => {
     const method = args.includes('-X') ? args[args.indexOf('-X') + 1] : 'GET';
     const [route, query = ''] = args.find(a => a.startsWith('repos/')).split('?');
     const body = input ? JSON.parse(input) : null;
+    state.routes.push(route);
     let m;
     if (route === 'repos/o/r') return JSON.stringify({default_branch: 'main'});
     if ((m = /^repos\/o\/r\/git\/ref\/heads\/(.+)$/.exec(route))) {
-      if (!state.branches[m[1]]) throw fail(404, 'Not Found (HTTP 404)');
-      return JSON.stringify({object: {sha: `commit-of-${m[1]}`}});
+      const name = decodeURIComponent(m[1]);
+      if (!state.branches[name]) throw fail(404, 'Not Found (HTTP 404)');
+      return JSON.stringify({object: {sha: `commit-of-${name}`}});
     }
     if (route === 'repos/o/r/git/refs') {
       const from = /^commit-of-(.+)$/.exec(body.sha)[1];
@@ -85,10 +87,30 @@ test('publish fails on a conflicting write, a readback difference and bad input'
   await assert.rejects(publish(ARGS, bundle([{path: 'a.md', content: 'mine\n'}]), differs.gh), /Readback of a\.md.*differs/);
   assert.equal(differs.state.prs.length, 0, 'no pull request over unverified bytes');
 
+  const rejected = fakeGh({onPut: () => { throw fail(422, 'Invalid request (HTTP 422)'); }});
+  await assert.rejects(publish(ARGS, bundle([{path: 'a.md', content: 'x'}]), rejected.gh), /GitHub rejected writing a\.md on topic \(HTTP 422\).*Invalid request/);
+
   const never = async () => { throw Error('gh must not run'); };
-  for (const [args, stdin] of [[ARGS, 'not json'], [ARGS, bundle([])], [ARGS, bundle([{path: '../x', content: 'x'}])], [ARGS, bundle([{path: 'a', content: 'x'}, {path: 'a', content: 'y'}])], [[...ARGS, '--body', 'x'], bundle([{path: 'a', content: 'x'}])], [['o/r', '--branch', 'b'], bundle([{path: 'a', content: 'x'}])], [['nope', '--branch', 'b', '--title', 't'], bundle([{path: 'a', content: 'x'}])]]) {
+  for (const [args, stdin] of [[ARGS, 'not json'], [ARGS, bundle([])], [ARGS, bundle([{path: '../x', content: 'x'}])], [ARGS, bundle([{path: 'a', content: 'x'}, {path: 'a', content: 'y'}])], [ARGS, bundle([{path: 'a', content: 'x'.repeat(1_000_001)}])], [ARGS, bundle([{path: 'a', content: 'not*base64', encoding: 'base64'}])], [ARGS, bundle([{path: 'a', content: 'YQ', encoding: 'base64'}])], [[...ARGS, '--body', 'x'], bundle([{path: 'a', content: 'x'}])], [['o/r', '--branch', 'b'], bundle([{path: 'a', content: 'x'}])], [['nope', '--branch', 'b', '--title', 't'], bundle([{path: 'a', content: 'x'}])]]) {
     await assert.rejects(publish(args, stdin, never));
   }
+});
+
+test('publish refuses the base branch before any write and names the paths already written after a failure', async () => {
+  for (const args of [['o/r', '--branch', 'main', '--title', 't'], ['o/r', '--branch', 'dev', '--base', 'dev', '--title', 't']]) {
+    const f = fakeGh({branches: {main: {}, dev: {}}});
+    await assert.rejects(publish(args, bundle([{path: 'a.md', content: 'x'}]), f.gh), /is the base branch.*Nothing was written/);
+    assert.deepEqual([f.state.puts, f.state.posts], [[], []]);
+  }
+  const f = fakeGh({onPut: path => { if (path === 'b.md') throw fail(409, 'does not match (HTTP 409)'); }});
+  await assert.rejects(publish(ARGS, bundle([{path: 'a.md', content: 'x'}, {path: 'b.md', content: 'y'}]), f.gh), /Conflict writing b\.md.*Already written on topic: a\.md$/);
+});
+
+test('publish encodes each segment of branch and base names in ref routes', async () => {
+  const f = fakeGh({branches: {'rel/1#x': {}}});
+  await publish(['o/r', '--branch', 'a#b/c%d', '--base', 'rel/1#x', '--title', 't'], bundle([{path: 'a.md', content: 'x'}]), f.gh);
+  assert.ok(f.state.routes.includes('repos/o/r/git/ref/heads/a%23b/c%25d') && f.state.routes.includes('repos/o/r/git/ref/heads/rel/1%23x'), f.state.routes.join(' '));
+  assert.deepEqual(f.state.posts, ['refs/heads/a#b/c%d']);
 });
 
 test('publish reads the bundle from stdin through the command and exits 1 on bad input', () => {

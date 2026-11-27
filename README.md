@@ -77,8 +77,8 @@ write. The verbs are tracker-neutral; this adapter stores the board in a GitHub
 Project through the private profile, so another tracker can later provide the
 same commands. It holds no workflow rules. Example:
 `ez kanban list --board OWNER/NUMBER --column Ready`. The login needs the
-`project` scope. A board read fails unless the items read equal the Project's
-`totalCount`, and `--body-file`
+`project` scope. `board` and `list` fail unless the items read equal the Project's
+`totalCount` (other verbs only look for one card), and `--body-file`
 on `add`/`comment` is read by the plugin (`-` reads stdin). See skills/kanban/SKILL.md.
 
 ## Read-only work queue preflight
