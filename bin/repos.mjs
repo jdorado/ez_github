@@ -1,6 +1,7 @@
 // Plugin-owned bound on /repos: sparse partial clones, reclaim of finished clones, size budget.
 import {execFile} from 'node:child_process';
 import {readdir, rename, rm, stat} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import {basename, join, posix} from 'node:path';
 import {promisify, parseArgs} from 'node:util';
 
@@ -184,6 +185,65 @@ export async function cloneRepo(argv, dir = reposDir()) {
   return {name, path: target, source: url, branch, sparsePaths: paths, bytes: (await diskBytes(target)).get(target) ?? 0};
 }
 
+// publish: files arrive as JSON on stdin (the container cannot see the caller's files). One contents-API write per file
+// (one commit each, no tree plumbing; a stale write fails with 409 instead of overwriting), then a readback of every
+// stored file before the pull request is opened or reused. The bundle is {"files":[{"path","content","encoding"?}],"body"?}; the pull request body travels in it, never as an argument.
+const blobSha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+
+export function nativeGh() {
+  return (args, input) => {
+    const child = run('gh', args, {env: cleanEnv(), maxBuffer: 64 * 1024 * 1024, timeout: 120e3});
+    child.child.stdin.on('error', () => {}); // gh may exit before reading its input
+    child.child.stdin.end(input ?? '');
+    return child.then(({stdout}) => stdout, error => {
+      const message = `${error.stderr || ''}${error.stdout || ''}`.trim().split('\n').filter(Boolean).slice(-2).join(' ') || error.message;
+      throw Object.assign(Error(message), {status: Number(/HTTP (\d+)/.exec(error.stderr || '')?.[1]) || null});
+    });
+  };
+}
+
+export async function publish(argv, stdin, gh = nativeGh()) {
+  const {values, positionals} = parseArgs({args: argv, allowPositionals: true, options: {branch: {type: 'string'}, title: {type: 'string'}, base: {type: 'string'}}});
+  const [repo, extra] = positionals, {branch, title} = values;
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '') || extra !== undefined || !branch || !title) throw Error('Use: repos publish OWNER/REPO --branch BRANCH --title TITLE [--base BASE] < bundle.json');
+  if (branch.startsWith('-') || values.base?.startsWith('-')) throw Error('--branch and --base must be branch names');
+  let bundle;
+  try { bundle = JSON.parse(stdin); } catch { throw Error('stdin must be a JSON bundle: {"files":[{"path":"a.md","content":"text"}]}'); }
+  const files = (Array.isArray(bundle?.files) ? bundle.files : []).map(file => {
+    const encoding = file?.encoding ?? 'utf8';
+    if (!safePath(file?.path) || typeof file.content !== 'string' || !['utf8', 'base64'].includes(encoding)) throw Error('Each file needs a relative "path", a string "content" and an optional "encoding" of utf8 or base64');
+    return {path: file.path, bytes: Buffer.from(file.content, encoding)};
+  });
+  if (!files.length || new Set(files.map(file => file.path)).size !== files.length) throw Error('The bundle needs one or more files with distinct paths');
+
+  const api = `repos/${repo}`, put = (path, body) => gh(['api', '-X', 'PUT', `${api}/${path}`, '--input', '-'], JSON.stringify(body));
+  const get = async path => JSON.parse(await gh(['api', `${api}/${path}`]));
+  const missing = promise => promise.catch(error => { if (error.status === 404) return null; throw error; });
+  const base = values.base ?? JSON.parse(await gh(['api', api])).default_branch;
+  if (!(await missing(get(`git/ref/heads/${branch}`)))) {
+    const sha = (await get(`git/ref/heads/${base}`)).object.sha;
+    await gh(['api', '-X', 'POST', `${api}/git/refs`, '--input', '-'], JSON.stringify({ref: `refs/heads/${branch}`, sha}));
+  }
+  const file = path => path.split('/').map(encodeURIComponent).join('/');
+  const stored = path => missing(get(`contents/${file(path)}?ref=${encodeURIComponent(branch)}`));
+  for (const {path, bytes} of files) {
+    const current = await stored(path);
+    if (current?.sha === blobSha(bytes)) continue; // already stored
+    try { await put(`contents/${file(path)}`, {message: title, content: bytes.toString('base64'), branch, ...(current ? {sha: current.sha} : {})}); } catch (error) {
+      throw Error(error.status === 409 || error.status === 422 ? `Conflict writing ${path} on ${branch}: the branch changed since it was read; nothing was retried (${error.message})` : `Writing ${path} on ${branch} failed: ${error.message}`);
+    }
+  }
+  const readback = [];
+  for (const {path, bytes} of files) {
+    const now = await stored(path);
+    if (!now || now.encoding !== 'base64' || !Buffer.from(now.content, 'base64').equals(bytes)) throw Error(`Readback of ${path} on ${branch} differs from the input (files over 1 MB cannot be read back)`);
+    readback.push({path, sha: now.sha});
+  }
+  const [open] = JSON.parse(await gh(['api', `${api}/pulls?state=open&head=${encodeURIComponent(`${repo.split('/')[0]}:${branch}`)}`]));
+  const pr = open ?? JSON.parse(await gh(['api', '-X', 'POST', `${api}/pulls`, '--input', '-'], JSON.stringify({title, head: branch, base, ...(typeof bundle.body === 'string' ? {body: bundle.body} : {})})));
+  return {url: pr.html_url, number: pr.number, created: !open, branch, base: pr.base?.ref ?? base, files: readback};
+}
+
 export const HELP = `ez github repos clone OWNER/REPO|URL [NAME] [--path DIR]... [--branch BRANCH]
   Partial, sparse clone into /repos/NAME: history without file contents, and a working tree of the root files plus each --path directory. Contents download when a path is added or needed.
   New files outside the checkout: git add --sparse FILE. More directories: git sparse-checkout add DIR. Use plain git clone only when the whole tree is needed.
@@ -191,7 +251,11 @@ ez github repos list [--idle-hours N]
   JSON: budget, usage and every clone's size, last activity and state (reclaimable, or keep with the reason).
 ez github repos reclaim [--idle-hours N]
   Removes clones idle for N hours (default ${DEFAULT_IDLE_HOURS}) with no uncommitted, untracked or ignored files (regenerable caches excepted), no stash, no submodules or embedded repositories, and every local branch commit (and HEAD) reachable from a remote-tracking ref. The remote is not re-checked, so a branch deleted there after its push still counts as pushed. Tags are not considered. Anything else is kept.
+ez github repos publish OWNER/REPO --branch BRANCH --title TITLE [--base BASE] < bundle.json
+  Bundle on stdin: {"body":"pull request text (optional)","files":[{"path":"docs/a.md","content":"text"},{"path":"b.bin","content":"<base64>","encoding":"base64"}]}. Creates BRANCH from BASE (default: the repository's default branch) or writes onto it if it exists, one commit per changed file (message: TITLE), reads every stored file back and compares its bytes, then opens the pull request or reuses the open one for BRANCH. JSON: url, number, created, branch, base, files (path, blob sha). Exits 1 on a conflict, a readback difference or any failure; nothing is retried, merged or resolved. Files over 1 MB cannot be read back.
 Every git clone and gh repo clone through this plugin first reclaims, then fails when /repos is over its budget (default ${DEFAULT_BUDGET_GIB} GiB, EZ_GITHUB_REPOS_BUDGET_GIB).`;
+
+const stdinText = async () => { const chunks = []; for await (const chunk of process.stdin) chunks.push(chunk); return Buffer.concat(chunks).toString('utf8'); };
 
 export async function repos(args, dir = reposDir()) {
   const [sub, ...rest] = args;
@@ -209,5 +273,6 @@ export async function repos(args, dir = reposDir()) {
       clones: clones.map(({name, path, state, reason, lastActivity: active}) => ({name, bytes: sizes.get(path) ?? 0, lastActivity: active, state, ...(reason ? {reason} : {})})),
     });
   }
-  throw Error('Use repos clone, list or reclaim; see --help');
+  if (sub === 'publish') return print(await publish(rest, await stdinText()));
+  throw Error('Use repos clone, list, reclaim or publish; see --help');
 }
