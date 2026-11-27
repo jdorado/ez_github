@@ -58,6 +58,17 @@ data repository (2.3 GiB each) accumulated to 91 GiB. The plugin now bounds the 
   `/repos` is over its budget (default 16 GiB; set `EZ_GITHUB_REPOS_BUDGET_GIB` in the
   service environment to change it). This is a bound, not a security boundary.
 
+## Publish files as a pull request
+
+`ez github repos publish OWNER/REPO --branch B --title T [--body TEXT] [--base BASE] < bundle.json`
+takes the files as a JSON bundle on stdin (`{"files":[{"path":"docs/a.md","content":"text"}]}`, with
+`"encoding":"base64"` for binary), so no host path is needed. It creates the branch from the base
+(default: the repository's default branch) or writes onto it, one contents-API commit per changed file,
+reads every stored file back and compares its bytes, then opens the pull request or reuses the open
+one for the branch, and prints `url`, `number`, `created`, `branch`, `base` and each file's `path` and blob `sha`.
+A write that conflicts with a changed branch, or a readback that differs, exits 1; nothing is retried,
+merged or resolved. Files over 1 MB cannot be read back.
+
 ## Kanban
 
 `ez kanban` gives agents basic task-board operations: `board`, `list`, `show`,
