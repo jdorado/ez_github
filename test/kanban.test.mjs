@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {kanban,main,parseBoard,pairs} from '../bin/kanban.mjs';
+import {kanban,main,parseBoard,pairs,exitCodeFor,CLAIM_MARKER} from '../bin/kanban.mjs';
 
 const field=(id,name,dataType,options)=>({id,name,dataType,...(options?{options:options.map((n,i)=>({id:`${id}o${i}`,name:n}))}:{})});
 const FIELDS=[field('F1','Status','SINGLE_SELECT',['Backlog','Ready','Done']),field('F2','Due date','DATE'),field('F3','Role','TEXT'),field('F4','Title','TEXT'),field('F5','Points','NUMBER')];
@@ -129,4 +129,48 @@ test('comment fails when provider readback does not match',async()=>{
   const gh=async args=>args[0]==='api'&&args[1]==='repos/o/r/issues/comments/5'
     ?JSON.stringify({html_url:'https://github.com/o/r/issues/1#issuecomment-6'}):fake.gh(args);
   await assert.rejects(kanban({gh}).comment({board:'o/2',body:'Done'},['o/r#1']),/Comment readback/);
+});
+
+// Claim races: a fake comment thread with ever-growing ids, on top of the board fake.
+function claimBoard(comments=[]) {
+  const fake=fakeGh([item('PVTI_2',2,[value('Status',{name:'Ready'})],{updatedAt:'2026-10-16T00:00:00Z'})]),thread=[...comments];let id=100;
+  const gh=async args=>{
+    if(args[0]==='api'&&args[1]==='repos/o/r/issues/2/comments') {
+      const created=new Date(Date.parse('2026-10-16T01:00:00Z')+thread.length*1000).toISOString(),body=args.find(a=>a.startsWith('body=')).slice(5);
+      const c={id:++id,body,created_at:created,html_url:`https://github.com/o/r/issues/2#issuecomment-${id}`};thread.push(c);return JSON.stringify(c);
+    }
+    if(args[0]==='api'&&args[1].startsWith('repos/o/r/issues/2/comments?')) return JSON.stringify(thread.filter(c=>c.created_at>=new URL('http://x/'+args[1]).searchParams.get('since')));
+    return fake.gh(args);
+  };
+  return {gh,thread,calls:fake.calls};
+}
+const claim={board:'o/2',by:'lane-5 (Claude)',from:'Ready',to:'Done'};
+const moves=calls=>calls.filter(a=>a[1]==='item-edit').length;
+
+test('two workers racing for one card: exactly one claims, the other sees it lost',async()=>{
+  const {gh,calls}=claimBoard(),k=kanban({gh});
+  const results=await Promise.all([k.claim(claim,['o/r#2']),k.claim({...claim,by:'lane-5 (Codex)'},['o/r#2'])]);
+  const won=results.filter(r=>r.claimed),lost=results.filter(r=>!r.claimed);
+  assert.equal(won.length,1);assert.equal(lost.length,1);
+  assert.equal(won[0].fields.Status,'Done');assert.equal(lost[0].reason,'lost');
+  assert.equal(lost[0].winner,won[0].comment);
+  assert.equal(moves(calls),1);
+});
+test('claim ignores a stale claim from before the card was released and leaves a card already taken',async()=>{
+  const stale={id:7,body:`Claimed by old.\n\n${CLAIM_MARKER}`,created_at:'2026-10-10T00:00:00Z',html_url:'https://github.com/o/r/issues/2#issuecomment-7'};
+  const {gh,calls,thread}=claimBoard([stale]),k=kanban({gh});
+  const out=await k.claim(claim,['o/r#2']);
+  assert.equal(out.claimed,true);assert.equal(moves(calls),1);
+  assert.match(thread.at(-1).body,/^Claimed by lane-5 \(Claude\) at \d{4}-.*\.\n\n<!-- ez-kanban-claim -->$/);
+  const again=await kanban({gh}).claim(claim,['o/r#2']);
+  assert.deepEqual([again.claimed,again.reason,again.column],[false,'not-in-column','Done']);
+  assert.equal(moves(calls),1);
+  assert.equal(thread.length,2);
+});
+test('claim validates its arguments before any write; a lost claim exits 3',async()=>{
+  const {gh,calls}=claimBoard();
+  await assert.rejects(kanban({gh}).claim({board:'o/2',from:'Ready',to:'Done'},['o/r#2']),/--by/);
+  await assert.rejects(kanban({gh}).claim({...claim,to:'Doing'},['o/r#2']),/not an option of Status/);
+  assert.equal(calls.filter(a=>a[0]!=='api').length,0);
+  assert.equal(exitCodeFor('{"claimed":false}'),3);assert.equal(exitCodeFor('{"claimed":true}'),0);assert.equal(exitCodeFor('usage'),0);
 });
