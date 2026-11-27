@@ -207,7 +207,7 @@ export async function publish(argv, stdin, gh = nativeGh()) {
   const {values, positionals} = parseArgs({args: argv, allowPositionals: true, options: {branch: {type: 'string'}, title: {type: 'string'}, base: {type: 'string'}}});
   const [repo, extra] = positionals, {branch, title} = values;
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '') || extra !== undefined || !branch || !title) throw Error('Use: repos publish OWNER/REPO --branch BRANCH --title TITLE [--base BASE] < bundle.json');
-  if (branch.startsWith('-') || values.base?.startsWith('-')) throw Error('--branch and --base must be branch names');
+  if ([branch, values.base].some(name => name !== undefined && /^(-|refs\/|heads\/)/.test(name))) throw Error('--branch and --base must be plain branch names, without a refs/ or heads/ prefix');
   let bundle;
   try { bundle = JSON.parse(stdin); } catch { throw Error('stdin must be a JSON bundle: {"files":[{"path":"a.md","content":"text"}]}'); }
   const files = (Array.isArray(bundle?.files) ? bundle.files : []).map(file => {

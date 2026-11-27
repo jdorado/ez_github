@@ -106,6 +106,12 @@ test('publish refuses the base branch before any write and names the paths alrea
   await assert.rejects(publish(ARGS, bundle([{path: 'a.md', content: 'x'}, {path: 'b.md', content: 'y'}]), f.gh), /Conflict writing b\.md.*Already written on topic: a\.md$/);
 });
 
+test('publish refuses a refs/ or heads/ prefix on branch and base', async () => {
+  for (const args of [['--branch', 'refs/heads/main'], ['--branch', 'heads/main'], ['--branch', 'x', '--base', 'refs/heads/main']]) {
+    await assert.rejects(publish(['o/r', ...args, '--title', 't'], JSON.stringify({files: [{path: 'a.md', content: 'a'}]}), async () => { throw Error('gh must not be called'); }), /plain branch names/);
+  }
+});
+
 test('publish encodes each segment of branch and base names in ref routes', async () => {
   const f = fakeGh({branches: {'rel/1#x': {}}});
   await publish(['o/r', '--branch', 'a#b/c%d', '--base', 'rel/1#x', '--title', 't'], bundle([{path: 'a.md', content: 'x'}]), f.gh);
