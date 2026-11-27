@@ -187,7 +187,7 @@ export async function cloneRepo(argv, dir = reposDir()) {
 
 // publish: files arrive as JSON on stdin (the container cannot see the caller's files). One contents-API write per file
 // (one commit each, no tree plumbing; a stale write fails with 409 instead of overwriting), then a readback of every
-// stored file before the pull request is opened or reused. The bundle is {"files":[{"path","content","encoding"?}]}.
+// stored file before the pull request is opened or reused. The bundle is {"files":[{"path","content","encoding"?}],"body"?}; the pull request body travels in it, never as an argument.
 const blobSha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 
 export function nativeGh() {
@@ -203,9 +203,9 @@ export function nativeGh() {
 }
 
 export async function publish(argv, stdin, gh = nativeGh()) {
-  const {values, positionals} = parseArgs({args: argv, allowPositionals: true, options: {branch: {type: 'string'}, title: {type: 'string'}, body: {type: 'string'}, base: {type: 'string'}}});
+  const {values, positionals} = parseArgs({args: argv, allowPositionals: true, options: {branch: {type: 'string'}, title: {type: 'string'}, base: {type: 'string'}}});
   const [repo, extra] = positionals, {branch, title} = values;
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '') || extra !== undefined || !branch || !title) throw Error('Use: repos publish OWNER/REPO --branch BRANCH --title TITLE [--body TEXT] [--base BASE] < bundle.json');
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '') || extra !== undefined || !branch || !title) throw Error('Use: repos publish OWNER/REPO --branch BRANCH --title TITLE [--base BASE] < bundle.json');
   if (branch.startsWith('-') || values.base?.startsWith('-')) throw Error('--branch and --base must be branch names');
   let bundle;
   try { bundle = JSON.parse(stdin); } catch { throw Error('stdin must be a JSON bundle: {"files":[{"path":"a.md","content":"text"}]}'); }
@@ -240,7 +240,7 @@ export async function publish(argv, stdin, gh = nativeGh()) {
     readback.push({path, sha: now.sha});
   }
   const [open] = JSON.parse(await gh(['api', `${api}/pulls?state=open&head=${encodeURIComponent(`${repo.split('/')[0]}:${branch}`)}`]));
-  const pr = open ?? JSON.parse(await gh(['api', '-X', 'POST', `${api}/pulls`, '--input', '-'], JSON.stringify({title, head: branch, base, ...(values.body === undefined ? {} : {body: values.body})})));
+  const pr = open ?? JSON.parse(await gh(['api', '-X', 'POST', `${api}/pulls`, '--input', '-'], JSON.stringify({title, head: branch, base, ...(typeof bundle.body === 'string' ? {body: bundle.body} : {})})));
   return {url: pr.html_url, number: pr.number, created: !open, branch, base: pr.base?.ref ?? base, files: readback};
 }
 
@@ -251,8 +251,8 @@ ez github repos list [--idle-hours N]
   JSON: budget, usage and every clone's size, last activity and state (reclaimable, or keep with the reason).
 ez github repos reclaim [--idle-hours N]
   Removes clones idle for N hours (default ${DEFAULT_IDLE_HOURS}) with no uncommitted, untracked or ignored files (regenerable caches excepted), no stash, no submodules or embedded repositories, and every local branch commit (and HEAD) reachable from a remote-tracking ref. The remote is not re-checked, so a branch deleted there after its push still counts as pushed. Tags are not considered. Anything else is kept.
-ez github repos publish OWNER/REPO --branch BRANCH --title TITLE [--body TEXT] [--base BASE] < bundle.json
-  Bundle on stdin: {"files":[{"path":"docs/a.md","content":"text"},{"path":"b.bin","content":"<base64>","encoding":"base64"}]}. Creates BRANCH from BASE (default: the repository's default branch) or writes onto it if it exists, one commit per changed file (message: TITLE), reads every stored file back and compares its bytes, then opens the pull request or reuses the open one for BRANCH. JSON: url, number, created, branch, base, files (path, blob sha). Exits 1 on a conflict, a readback difference or any failure; nothing is retried, merged or resolved. Files over 1 MB cannot be read back.
+ez github repos publish OWNER/REPO --branch BRANCH --title TITLE [--base BASE] < bundle.json
+  Bundle on stdin: {"body":"pull request text (optional)","files":[{"path":"docs/a.md","content":"text"},{"path":"b.bin","content":"<base64>","encoding":"base64"}]}. Creates BRANCH from BASE (default: the repository's default branch) or writes onto it if it exists, one commit per changed file (message: TITLE), reads every stored file back and compares its bytes, then opens the pull request or reuses the open one for BRANCH. JSON: url, number, created, branch, base, files (path, blob sha). Exits 1 on a conflict, a readback difference or any failure; nothing is retried, merged or resolved. Files over 1 MB cannot be read back.
 Every git clone and gh repo clone through this plugin first reclaims, then fails when /repos is over its budget (default ${DEFAULT_BUDGET_GIB} GiB, EZ_GITHUB_REPOS_BUDGET_GIB).`;
 
 const stdinText = async () => { const chunks = []; for await (const chunk of process.stdin) chunks.push(chunk); return Buffer.concat(chunks).toString('utf8'); };

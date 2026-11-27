@@ -60,8 +60,8 @@ data repository (2.3 GiB each) accumulated to 91 GiB. The plugin now bounds the 
 
 ## Publish files as a pull request
 
-`ez github repos publish OWNER/REPO --branch B --title T [--body TEXT] [--base BASE] < bundle.json`
-takes the files as a JSON bundle on stdin (`{"files":[{"path":"docs/a.md","content":"text"}]}`, with
+`ez github repos publish OWNER/REPO --branch B --title T [--base BASE] < bundle.json`
+takes the files as a JSON bundle on stdin (`{"files":[{"path":"docs/a.md","content":"text"}],"body":"optional pull request text"}`, with
 `"encoding":"base64"` for binary), so no host path is needed. It creates the branch from the base
 (default: the repository's default branch) or writes onto it, one contents-API commit per changed file,
 reads every stored file back and compares its bytes, then opens the pull request or reuses the open

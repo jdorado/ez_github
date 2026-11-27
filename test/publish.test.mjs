@@ -49,19 +49,19 @@ function fakeGh({branches = {main: {'README.md': Buffer.from('root\n')}}, prs = 
   };
   return {gh, state};
 }
-const bundle = files => JSON.stringify({files});
+const bundle = (files, body) => JSON.stringify({files, ...(body === undefined ? {} : {body})});
 const ARGS = ['o/r', '--branch', 'topic', '--title', 'Add notes'];
 
 test('publish creates the branch, writes text and binary files, reads them back and opens the pull request', async () => {
   const f = fakeGh();
   const png = Buffer.from([0, 255, 1, 254]);
-  const result = await publish([...ARGS, '--body', 'why'], bundle([{path: 'docs/a b.md', content: 'héllo\n'}, {path: 'img.bin', content: png.toString('base64'), encoding: 'base64'}]), f.gh);
+  const result = await publish(ARGS, bundle([{path: 'docs/a b.md', content: 'héllo\n'}, {path: 'img.bin', content: png.toString('base64'), encoding: 'base64'}], 'why\n'.repeat(50000)), f.gh);
   assert.deepEqual(f.state.posts, ['refs/heads/topic']);
   assert.equal(f.state.puts.length, 2);
   assert.ok(f.state.puts.every(put => put.message === 'Add notes' && put.branch === 'topic' && !put.sha));
   assert.deepEqual(result, {url: 'https://github.com/o/r/pull/7', number: 7, created: true, branch: 'topic', base: 'main',
     files: [{path: 'docs/a b.md', sha: sha1(Buffer.from('héllo\n'))}, {path: 'img.bin', sha: sha1(png)}]});
-  assert.equal(f.state.prs[0].body, 'why');
+  assert.equal(f.state.prs[0].body, 'why\n'.repeat(50000), 'a long body travels in the bundle');
   assert.equal(f.state.branches.topic['img.bin'].equals(png), true);
   assert.equal(f.state.branches.main['docs/a b.md'], undefined, 'the base is untouched');
 });
@@ -86,7 +86,7 @@ test('publish fails on a conflicting write, a readback difference and bad input'
   assert.equal(differs.state.prs.length, 0, 'no pull request over unverified bytes');
 
   const never = async () => { throw Error('gh must not run'); };
-  for (const [args, stdin] of [[ARGS, 'not json'], [ARGS, bundle([])], [ARGS, bundle([{path: '../x', content: 'x'}])], [ARGS, bundle([{path: 'a', content: 'x'}, {path: 'a', content: 'y'}])], [['o/r', '--branch', 'b'], bundle([{path: 'a', content: 'x'}])], [['nope', '--branch', 'b', '--title', 't'], bundle([{path: 'a', content: 'x'}])]]) {
+  for (const [args, stdin] of [[ARGS, 'not json'], [ARGS, bundle([])], [ARGS, bundle([{path: '../x', content: 'x'}])], [ARGS, bundle([{path: 'a', content: 'x'}, {path: 'a', content: 'y'}])], [[...ARGS, '--body', 'x'], bundle([{path: 'a', content: 'x'}])], [['o/r', '--branch', 'b'], bundle([{path: 'a', content: 'x'}])], [['nope', '--branch', 'b', '--title', 't'], bundle([{path: 'a', content: 'x'}])]]) {
     await assert.rejects(publish(args, stdin, never));
   }
 });
