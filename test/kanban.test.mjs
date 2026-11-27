@@ -1,5 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {mkdtemp,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {kanban,main,parseBoard,pairs,exitCodeFor,CLAIM_MARKER} from '../bin/kanban.mjs';
 
 const field=(id,name,dataType,options)=>({id,name,dataType,...(options?{options:options.map((n,i)=>({id:`${id}o${i}`,name:n}))}:{})});
@@ -11,9 +14,9 @@ const item=(id,number,fields,extra={})=>({id,isArchived:false,...extra,
 
 // A fake gh: two board pages, item-edit/item-add/issue calls recorded and applied.
 function fakeGh(items) {
-  const calls=[],state=structuredClone(items);
-  const gh=async args=>{
-    calls.push(args);
+  const calls=[],inputs=[],state=structuredClone(items);
+  const gh=async(args,input)=>{
+    calls.push(args);if(input!==undefined) inputs.push(input);
     if(args[0]==='api'&&args[1]==='repos/o/r/issues/comments/5') return JSON.stringify({html_url:'https://github.com/o/r/issues/1#issuecomment-5'});
     if(args[0]==='api') {
       const query=args.find(a=>a.startsWith('query=')),after=args.find(a=>a.startsWith('after='));
@@ -39,7 +42,7 @@ function fakeGh(items) {
     if(args[0]==='issue'&&args[1]==='comment') return 'https://github.com/o/r/issues/1#issuecomment-5\n';
     throw Error(`unexpected gh ${args.join(' ')}`);
   };
-  return {gh,calls,state};
+  return {gh,calls,inputs,state};
 }
 const board=()=>fakeGh([item('PVTI_1',1,[value('Status',{name:'Backlog'}),value('Due date',{date:'2026-10-16'}),value('Role',{text:'CIO'})]),item('PVTI_2',2,[value('Status',{name:'Ready'})])]);
 
@@ -180,4 +183,25 @@ test('claim validates its arguments before any write; a lost claim exits 3',asyn
   await assert.rejects(kanban({gh}).claim({...claim,to:'Doing'},['o/r#2']),/not an option of Status/);
   assert.equal(calls.filter(a=>a[0]!=='api').length,0);
   assert.equal(exitCodeFor('{"claimed":false}'),3);assert.equal(exitCodeFor('{"claimed":true}'),0);assert.equal(exitCodeFor('usage'),0);
+});
+
+test('--body-file is read by the plugin and sent to gh on stdin; stdin works with -; an unreadable or empty body writes nothing',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'kanban-'));
+  const file=join(dir,'brief.md'),empty=join(dir,'empty.md'),long='x'.repeat(200000);
+  await writeFile(file,long);await writeFile(empty,' \n');
+  const {gh,calls,inputs}=board();
+  const k=kanban({gh,stdin:async()=>'From stdin'});
+  await k.add({board:'o/2',repo:'o/r',title:'New','body-file':file});
+  assert.deepEqual(calls.find(a=>a[1]==='create'),['issue','create','--repo','o/r','--title','New','--body-file','-']);
+  assert.equal(inputs[0],long);
+  await k.comment({board:'o/2','body-file':'-'},['PVTI_1']);
+  assert.deepEqual(calls.find(a=>a[1]==='comment').slice(-2),['--body-file','-']);
+  assert.equal(inputs[1],'From stdin');
+  const before=calls.length;
+  for(const [options,message] of [[{'body-file':join(dir,'missing.md')},/Cannot read --body-file .*missing\.md/],[{'body-file':empty},/empty\.md is empty/]]) {
+    await assert.rejects(k.comment({board:'o/2',...options},['PVTI_1']),message);
+    await assert.rejects(k.add({board:'o/2',repo:'o/r',title:'X',...options}),message);
+  }
+  await assert.rejects(kanban({gh,stdin:async()=>''}).comment({board:'o/2','body-file':'-'},['PVTI_1']),/stdin is empty/);
+  assert.equal(calls.length,before);
 });
