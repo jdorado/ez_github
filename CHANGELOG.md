@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-beta.10
+
+- Add `kanban claim CARD --by WHO --from COLUMN --to COLUMN [--note T]`, so that when two workers take the same card at once exactly one proceeds. GitHub Projects have no compare-and-set, so the claim is decided by the comment thread: `claim` checks the card is in `--from`, posts a claim comment, reads the claim comments made since the card last changed and moves the card to `--to` only if its own has the lowest comment id (ids only grow, so every claimant reaches the same answer). The other prints `{"claimed":false,"reason":"lost","winner":...}` and exits 3 with `winnerAgeSeconds` (the winning claim's age on GitHub's clock, so an old one shows a winner that died before moving the card; any field change on the card releases it); a card already moved prints `not-in-column`. Cards now show `updatedAt` in `list`, `show` and write output. Before this, a claim was `move` plus a hand-written comment with no check that it won, and two Lane 5 workers claimed one card in the same second and both ran it in full.
+
 ## 0.1.0-beta.9
 
 - `github-work` checks that Ez core runs in one scheduler tick now share a single complete Project read instead of each reading the whole board. Core (the release after 0.79.0) passes the tick's start as `EZ_PREFLIGHT_SINCE`; a check reuses a read only if it began at or after that instant and is under two minutes old, so a later tick, a manual trigger and any direct call still read again. Filtering, eligibility, count, fingerprint and item IDs are unchanged; `observedAt` is now the time the Project was read. With an older core nothing changes. Fixes eight queue lanes on one Project making nine identical reads (about 6 s each) every 15 minutes.

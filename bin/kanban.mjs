@@ -8,7 +8,7 @@ import {promisify} from 'node:util';
 import {parseArgs} from 'node:util';
 import {pathToFileURL} from 'node:url';
 
-const ITEM=`fragment I on ProjectV2Item{id isArchived content{__typename ...on Issue{number title url state repository{nameWithOwner}} ...on PullRequest{number title url prState:state repository{nameWithOwner}} ...on DraftIssue{title}} fieldValues(first:50){nodes{
+const ITEM=`fragment I on ProjectV2Item{id isArchived updatedAt content{__typename ...on Issue{number title url state repository{nameWithOwner}} ...on PullRequest{number title url prState:state repository{nameWithOwner}} ...on DraftIssue{title}} fieldValues(first:50){nodes{
 ...on ProjectV2ItemFieldSingleSelectValue{name field{...on ProjectV2FieldCommon{name}}}
 ...on ProjectV2ItemFieldTextValue{text field{...on ProjectV2FieldCommon{name}}}
 ...on ProjectV2ItemFieldDateValue{date field{...on ProjectV2FieldCommon{name}}}
@@ -25,21 +25,27 @@ export const HELP=`ez kanban <command> --board OWNER/NUMBER [options]
   move CARD COLUMN              change the card's column, read back
   set CARD NAME=VALUE...        change fields (text, date YYYY-MM-DD, number, option); NAME= clears
   comment CARD (--body T | --body-file F)
+  claim CARD --by WHO --from COLUMN --to COLUMN [--note T]   take a card; exactly one concurrent claimant wins
 CARD is the card id from list, OWNER/REPO#N or the issue/PR URL. --column-field
-names the column field (default Status). Output is JSON; errors exit 1.`;
+names the column field (default Status). Output is JSON; errors exit 1. claim exits 3 when another
+worker holds the card ({"claimed":false}): leave that card alone and pick another. A lost claim
+reports winnerAgeSeconds, how long ago the winning claim was posted.`;
 
 const plain=item=>{
   const c=item.content??{},fields={};
   for(const v of item.fieldValues?.nodes??[]) if(v?.field?.name && v.field.name!=='Title') fields[v.field.name]=v.name??v.text??v.date??v.number??v.title??null;
   return {card:item.id,type:c.__typename==='DraftIssue'?'draft':c.__typename==='PullRequest'?'pr':'issue',
     ref:c.repository?`${c.repository.nameWithOwner}#${c.number}`:null,url:c.url??null,title:c.title??null,
-    state:(c.state??c.prState)?.toLowerCase()??null,archived:!!item.isArchived,fields};
+    state:(c.state??c.prState)?.toLowerCase()??null,archived:!!item.isArchived,...(item.updatedAt?{updatedAt:item.updatedAt}:{}),fields};
 };
 export function parseBoard(text) {
   const m=/^([A-Za-z0-9-]+)\/(\d+)$/.exec(text??'');
   if(!m) throw Error('Use --board OWNER/NUMBER');
   return {owner:m[1],number:Number(m[2])};
 }
+// A claim is a comment carrying this marker. Comment ids only grow, so of all claims made since the card last
+// changed, the lowest id is the winner whichever order the claimants read back in.
+export const CLAIM_MARKER='<!-- ez-kanban-claim -->';
 export function kanban({gh,columnField='Status'}) {
   const json=async args=>JSON.parse(await gh(args));
   const gql=async(query,vars)=>{
@@ -135,15 +141,35 @@ export function kanban({gh,columnField='Status'}) {
       if(saved.html_url!==url) throw Error('Comment readback did not match the created comment');
       return {card:card.card,ref:card.ref,comment:saved.html_url};
     },
+    // GitHub has no compare-and-set on Project fields, so the claim is decided by the comment thread: post a
+    // claim, read the claims made since the card last changed, and only the lowest comment id moves the card.
+    async claim(o,[ref]) {
+      const {by,from,to,note}=o;
+      if(!ref||!by?.trim()||!from||!to) throw Error('claim needs CARD, --by, --from and --to');
+      const b=await read(o.board),card=find(b,ref);
+      if(card.type==='draft') throw Error('Draft cards take no comments; convert it to an issue');
+      editArgs(b,columnField,from);editArgs(b,columnField,to);
+      const column=card.fields[field(b,columnField).name]??null;
+      if(String(column??'').toLowerCase()!==from.toLowerCase()) return {claimed:false,reason:'not-in-column',card:card.card,ref:card.ref,column};
+      const [repo,number]=card.ref.split('#'),comments=`repos/${repo}/issues/${number}/comments`;
+      const mine=await json(['api',comments,'-f',`body=Claimed by ${by.trim()} at ${new Date().toISOString()}.${note?`\n\n${note}`:''}\n\n${CLAIM_MARKER}`]);
+      const since=card.updatedAt??'1970-01-01T00:00:00Z';
+      const claims=(await json(['api',`${comments}?per_page=100&since=${since}`])).filter(c=>c.body?.includes(CLAIM_MARKER)&&Date.parse(c.created_at)>=Date.parse(since)).sort((x,y)=>x.id-y.id);
+      if(!claims.some(c=>c.id===mine.id)) throw Error('Claim readback did not find the claim comment');
+      // The winner's age is read on GitHub's clock (our comment was created just now), so no local clock is involved.
+      if(claims[0].id!==mine.id) return {claimed:false,reason:'lost',card:card.card,ref:card.ref,winner:claims[0].html_url,winnerAgeSeconds:Math.max(0,Math.round((Date.parse(mine.created_at)-Date.parse(claims[0].created_at))/1000)),comment:mine.html_url};
+      return {claimed:true,comment:mine.html_url,...await setAll(b,card.card,[[columnField,to]])};
+    },
   };
 }
 export function pairs(values=[]) {
   return values.map(s=>{const at=s.indexOf('=');if(at<1) throw Error(`Use NAME=VALUE, not "${s}"`);return [s.slice(0,at),s.slice(at+1)];});
 }
+export const exitCodeFor=text=>{try {return JSON.parse(text).claimed===false?3:0;} catch {return 0;}};
 export async function main(argv,gh) {
   const {values,positionals}=parseArgs({args:argv,allowPositionals:true,options:{
     board:{type:'string'},column:{type:'string'},'column-field':{type:'string'},field:{type:'string',multiple:true},
-    set:{type:'string',multiple:true},repo:{type:'string'},title:{type:'string'},body:{type:'string'},'body-file':{type:'string'},help:{type:'boolean'}}});
+    set:{type:'string',multiple:true},by:{type:'string'},from:{type:'string'},to:{type:'string'},note:{type:'string'},repo:{type:'string'},title:{type:'string'},body:{type:'string'},'body-file':{type:'string'},help:{type:'boolean'}}});
   const [verb,...rest]=positionals;
   if(values.help||!verb) return HELP;
   const k=kanban({gh,columnField:values['column-field']});
@@ -161,6 +187,6 @@ export function nativeGh() {
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   process.umask(0o077);
-  try {console.log(await main(process.argv.slice(2),nativeGh()));}
+  try {const out=await main(process.argv.slice(2),nativeGh());console.log(out);process.exitCode=exitCodeFor(out);}
   catch(error) {console.error(error.message);process.exitCode=1;}
 }
