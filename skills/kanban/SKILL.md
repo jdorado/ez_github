@@ -31,7 +31,11 @@ Read the card, then run `claim` once: it posts a claim comment (naming `--by`), 
 the claims made since the card last changed and moves the card only if yours is the
 earliest (lowest comment id). It prints `"claimed": true` with the card, or exits 3
 with `"claimed": false` (`lost`, with the winning comment, or `not-in-column` when the
-card already moved): leave that card alone and take another. Do not post your own claim
+card already moved): leave that card alone and take another. A `lost` result also
+carries `winnerAgeSeconds`, the winning claim's age on GitHub's clock; the card was in
+`--from` when you started, so a large age means the winner may have died before moving
+it. Such a card stays lost to everyone until it changes, and any field change on it
+(for example the board manager setting it again) releases it for a new claim. Do not post your own claim
 comment or `move` the card first; the claim is the comment `claim` writes, and a claim
 that did not win needs no undoing. One claim costs one Project read, one field write and
 one readback, less than reading, moving and commenting by hand.

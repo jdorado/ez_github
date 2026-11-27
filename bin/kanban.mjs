@@ -28,7 +28,8 @@ export const HELP=`ez kanban <command> --board OWNER/NUMBER [options]
   claim CARD --by WHO --from COLUMN --to COLUMN [--note T]   take a card; exactly one concurrent claimant wins
 CARD is the card id from list, OWNER/REPO#N or the issue/PR URL. --column-field
 names the column field (default Status). Output is JSON; errors exit 1. claim exits 3 when another
-worker holds the card ({"claimed":false}): leave that card alone and pick another.`;
+worker holds the card ({"claimed":false}): leave that card alone and pick another. A lost claim
+reports winnerAgeSeconds, how long ago the winning claim was posted.`;
 
 const plain=item=>{
   const c=item.content??{},fields={};
@@ -155,7 +156,8 @@ export function kanban({gh,columnField='Status'}) {
       const since=card.updatedAt??'1970-01-01T00:00:00Z';
       const claims=(await json(['api',`${comments}?per_page=100&since=${since}`])).filter(c=>c.body?.includes(CLAIM_MARKER)&&Date.parse(c.created_at)>=Date.parse(since)).sort((x,y)=>x.id-y.id);
       if(!claims.some(c=>c.id===mine.id)) throw Error('Claim readback did not find the claim comment');
-      if(claims[0].id!==mine.id) return {claimed:false,reason:'lost',card:card.card,ref:card.ref,winner:claims[0].html_url,comment:mine.html_url};
+      // The winner's age is read on GitHub's clock (our comment was created just now), so no local clock is involved.
+      if(claims[0].id!==mine.id) return {claimed:false,reason:'lost',card:card.card,ref:card.ref,winner:claims[0].html_url,winnerAgeSeconds:Math.max(0,Math.round((Date.parse(mine.created_at)-Date.parse(claims[0].created_at))/1000)),comment:mine.html_url};
       return {claimed:true,comment:mine.html_url,...await setAll(b,card.card,[[columnField,to]])};
     },
   };

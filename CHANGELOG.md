@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-beta.10
 
-- Add `kanban claim CARD --by WHO --from COLUMN --to COLUMN [--note T]`, so that when two workers take the same card at once exactly one proceeds. GitHub Projects have no compare-and-set, so the claim is decided by the comment thread: `claim` checks the card is in `--from`, posts a claim comment, reads the claim comments made since the card last changed and moves the card to `--to` only if its own has the lowest comment id (ids only grow, so every claimant reaches the same answer). The other prints `{"claimed":false,"reason":"lost","winner":...}` and exits 3; a card already moved prints `not-in-column`. Cards now show `updatedAt` in `list`, `show` and write output. Before this, a claim was `move` plus a hand-written comment with no check that it won, and two Lane 5 workers claimed one card in the same second and both ran it in full.
+- Add `kanban claim CARD --by WHO --from COLUMN --to COLUMN [--note T]`, so that when two workers take the same card at once exactly one proceeds. GitHub Projects have no compare-and-set, so the claim is decided by the comment thread: `claim` checks the card is in `--from`, posts a claim comment, reads the claim comments made since the card last changed and moves the card to `--to` only if its own has the lowest comment id (ids only grow, so every claimant reaches the same answer). The other prints `{"claimed":false,"reason":"lost","winner":...}` and exits 3 with `winnerAgeSeconds` (the winning claim's age on GitHub's clock, so an old one shows a winner that died before moving the card; any field change on the card releases it); a card already moved prints `not-in-column`. Cards now show `updatedAt` in `list`, `show` and write output. Before this, a claim was `move` plus a hand-written comment with no check that it won, and two Lane 5 workers claimed one card in the same second and both ran it in full.
 
 ## 0.1.0-beta.9
 

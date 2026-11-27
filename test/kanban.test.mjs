@@ -153,7 +153,7 @@ test('two workers racing for one card: exactly one claims, the other sees it los
   const won=results.filter(r=>r.claimed),lost=results.filter(r=>!r.claimed);
   assert.equal(won.length,1);assert.equal(lost.length,1);
   assert.equal(won[0].fields.Status,'Done');assert.equal(lost[0].reason,'lost');
-  assert.equal(lost[0].winner,won[0].comment);
+  assert.equal(lost[0].winner,won[0].comment);assert.equal(typeof lost[0].winnerAgeSeconds,'number');
   assert.equal(moves(calls),1);
 });
 test('claim ignores a stale claim from before the card was released and leaves a card already taken',async()=>{
@@ -166,6 +166,13 @@ test('claim ignores a stale claim from before the card was released and leaves a
   assert.deepEqual([again.claimed,again.reason,again.column],[false,'not-in-column','Done']);
   assert.equal(moves(calls),1);
   assert.equal(thread.length,2);
+});
+test('a claim that lost to an old winner reports the winner\'s age and moves nothing',async()=>{
+  const dead={id:7,body:`Claimed by dead worker.\n\n${CLAIM_MARKER}`,created_at:'2026-10-16T00:30:00Z',html_url:'https://github.com/o/r/issues/2#issuecomment-7'};
+  const {gh,calls}=claimBoard([dead]);
+  const out=await kanban({gh}).claim(claim,['o/r#2']);
+  assert.deepEqual([out.claimed,out.reason,out.winner,out.winnerAgeSeconds],[false,'lost',dead.html_url,1801]);
+  assert.equal(moves(calls),0);
 });
 test('claim validates its arguments before any write; a lost claim exits 3',async()=>{
   const {gh,calls}=claimBoard();
