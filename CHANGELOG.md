@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-beta.11
 
 - `kanban` no longer returns part of a board without saying so. Every command that reads the board compares the items it read with the Project's `totalCount` and exits 1 with both numbers when they differ; a failed page already exited 1, and a card with more than 100 field values (read limit raised from 50) or a board with more than 100 fields now fails the read instead of losing fields. `board` adds `read` and `totalCount`; `list` keeps printing a bare array, so the error is its only signal (putting the counts in the `list` result was withdrawn because it would break every caller).
 - `kanban add` and `comment` read `--body-file` in the plugin and send the text to `gh` on stdin, so a long body needs neither an argument nor a path `gh` can see. An unreadable or empty file is an error and nothing is posted; `--body-file -` reads stdin.
+- Add `repos publish OWNER/REPO --branch B --title T [--base BASE] < bundle.json`: writes the bundle's files to a branch (created from the base or written onto), one contents-API commit per changed file, reads every stored file back and compares its bytes, then opens the pull request or reuses the open one. The bundle is JSON on stdin, `{"files":[{"path","content","encoding"?}],"body"?}`, so neither file content nor the pull request body travels as an argument or a host path. A stale write fails with a conflict error and nothing is retried. Files over 1 MB cannot be read back and fail.
 
 ## 0.1.0-beta.10
 
